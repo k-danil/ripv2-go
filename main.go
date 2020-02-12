@@ -63,7 +63,6 @@ func socket(ifcn []string) *ipv4.PacketConn {
 		}
 	}
 
-	// defer p.LeaveGroup(br0, &mrip)
 	if err := p.SetControlMessage(ipv4.FlagDst, true); err != nil {
 		log.Fatal(err)
 	}

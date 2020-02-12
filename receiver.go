@@ -88,7 +88,6 @@ func (p *packet) validator(pass string) error {
 			} else {
 				return errors.New("Wrong auth method")
 			}
-
 		}
 
 		ip := net.IP(p.pdu.entry[l]["ip"])
