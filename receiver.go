@@ -67,7 +67,7 @@ func (p *packet) parser() {
 	p.pdu.entry = entry
 }
 
-func (p *packet) validator() error {
+func (p *packet) validator(pass string) error {
 	if p.pdu.header["version"][0] != byte(2) {
 		return errors.New("Incorrect RIP version (use 2)")
 	}
@@ -75,8 +75,22 @@ func (p *packet) validator() error {
 	for l := 0; l < len(p.pdu.entry); l++ {
 		//TODO authentication method
 		if binary.BigEndian.Uint16(p.pdu.entry[l]["afi"]) == uint16(65535) {
-			return errors.New("Authentication needed TODO")
+			if binary.BigEndian.Uint16(p.pdu.entry[l]["authType"]) == uint16(2) {
+				err := p.authPlain(pass)
+				if err != nil {
+					return err
+				}
+			} else if binary.BigEndian.Uint16(p.pdu.entry[l]["authType"]) == uint16(3) {
+				err := p.authMD5(pass)
+				if err != nil {
+					return err
+				}
+			} else {
+				return errors.New("Wrong auth method")
+			}
+
 		}
+
 		ip := net.IP(p.pdu.entry[l]["ip"])
 		//TODO remove and trim for broken entry
 		if binary.BigEndian.Uint16(p.pdu.entry[l]["metric"]) > uint16(16) {
@@ -85,5 +99,18 @@ func (p *packet) validator() error {
 			return errors.New("Bad address")
 		}
 	}
+	return nil
+}
+
+func (p *packet) authPlain(pass string) error {
+	if len(pass) > len(p.pdu.entry[0]["auth"]) {
+		return errors.New("Configured pass longer then 16byte")
+	}
+	if string(p.pdu.entry[0]["auth"]) != pass {
+		return errors.New("Unautorized pdu")
+	}
+	return nil
+}
+func (p *packet) authMD5(pass string) error {
 	return nil
 }

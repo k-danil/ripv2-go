@@ -24,7 +24,7 @@ func main() {
 					log.Fatal(err)
 				}
 				r.parser()
-				err = r.validator()
+				err = r.validator("")
 				if err != nil {
 					log.Println(err)
 				}
