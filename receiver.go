@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"net"
 )
 
@@ -71,9 +71,7 @@ func (p *packet) validator(pass string) error {
 	if p.pdu.header["version"][0] != byte(2) {
 		return errors.New("Incorrect RIP version (use 2)")
 	}
-	fmt.Println(len(p.pdu.entry))
 	for l := 0; l < len(p.pdu.entry); l++ {
-		//TODO authentication method
 		if binary.BigEndian.Uint16(p.pdu.entry[l]["afi"]) == uint16(65535) {
 			if binary.BigEndian.Uint16(p.pdu.entry[l]["authType"]) == uint16(2) {
 				err := p.authPlain(pass)
@@ -81,35 +79,33 @@ func (p *packet) validator(pass string) error {
 					return err
 				}
 			} else if binary.BigEndian.Uint16(p.pdu.entry[l]["authType"]) == uint16(3) {
-				err := p.authMD5(pass)
+				err := p.authHash(pass)
 				if err != nil {
 					return err
 				}
 			} else {
 				return errors.New("Wrong auth method")
 			}
-		}
-
-		ip := net.IP(p.pdu.entry[l]["ip"])
-		//TODO remove and trim for broken entry
-		if binary.BigEndian.Uint16(p.pdu.entry[l]["metric"]) > uint16(16) {
-			return errors.New("Bad metric")
-		} else if !ip.IsGlobalUnicast() {
-			return errors.New("Bad address")
+		} else {
+			ip := net.IP(p.pdu.entry[l]["ip"])
+			//TODO remove and trim for broken entry
+			if binary.BigEndian.Uint16(p.pdu.entry[l]["metric"]) > uint16(16) {
+				return errors.New("Bad metric")
+			} else if !ip.IsGlobalUnicast() {
+				return errors.New("Bad address")
+			}
 		}
 	}
 	return nil
 }
 
 func (p *packet) authPlain(pass string) error {
-	if len(pass) > len(p.pdu.entry[0]["auth"]) {
-		return errors.New("Configured pass longer then 16byte")
-	}
-	if string(p.pdu.entry[0]["auth"]) != pass {
-		return errors.New("Unautorized pdu")
+	if string(bytes.TrimRight(p.pdu.entry[0]["auth"], "\x00")) != pass {
+		return errors.New("Unauthenticated plain pass pdu")
 	}
 	return nil
 }
-func (p *packet) authMD5(pass string) error {
-	return nil
+
+func (p *packet) authHash(pass string) error {
+	return errors.New("Hash authentication not implemented yet")
 }
