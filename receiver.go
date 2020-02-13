@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -80,7 +81,7 @@ func (p *packet) parser() {
 			authType := binary.BigEndian.Uint16(offset[2:4])
 			switch authType {
 			case authKey:
-				p.pdu.authKeyEntry = bytes.TrimRight(offset[4:30], "\x00")
+				p.pdu.authKeyEntry = offset[4:p.pdu.authEntry.authLng]
 			case authPlain:
 				p.pdu.authKeyEntry = bytes.TrimRight(offset[4:20], "\x00")
 			case authHash:
@@ -144,8 +145,25 @@ func (p *packet) authPlain(pass string) error {
 }
 
 func (p *packet) authHash(pass string) error {
-	p.pdu.err = true
-	return errors.New("Hash authentication not implemented yet")
+	pa := pass
+	for l := 0; l < (len(p.pdu.authKeyEntry) - len(pass)); l++ {
+		pa += "\x00"
+	}
+
+	offset := p.pdu.authEntry.packLng + 4
+	temp := make([]byte, 0)
+	temp = append(temp, p.content[:offset]...)
+	temp = append(temp, pa...)
+	hash := md5.Sum(temp)
+
+	temp2 := make([]byte, 0)
+	temp2 = append(temp2, hash[:]...)
+
+	if !bytes.Equal(temp2, p.pdu.authKeyEntry) {
+		p.pdu.err = true
+		return errors.New("Unauthenticated md5 pass pdu")
+	}
+	return nil
 }
 
 func uintToIP(ip uint32) net.IP {
