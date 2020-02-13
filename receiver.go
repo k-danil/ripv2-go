@@ -83,15 +83,16 @@ func (p *packet) validator(pass string) error {
 				if err != nil {
 					return err
 				}
+			} else if binary.BigEndian.Uint16(p.pdu.entry[l]["authType"]) == uint16(1) {
+				continue
 			} else {
 				return errors.New("Wrong auth method")
 			}
 		} else {
-			ip := net.IP(p.pdu.entry[l]["ip"])
 			//TODO remove and trim for broken entry
 			if binary.BigEndian.Uint16(p.pdu.entry[l]["metric"]) > uint16(16) {
 				return errors.New("Bad metric")
-			} else if !ip.IsGlobalUnicast() {
+			} else if !net.IP(p.pdu.entry[l]["ip"]).IsGlobalUnicast() {
 				return errors.New("Bad address")
 			}
 		}
