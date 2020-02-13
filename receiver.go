@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
 )
 
@@ -108,5 +110,6 @@ func (p *packet) authPlain(pass string) error {
 }
 
 func (p *packet) authHash(pass string) error {
+	fmt.Printf("%v %v", md5.Sum(p.content), p.pdu.entry[len(p.pdu.entry)-1]["auth"])
 	return errors.New("Hash authentication not implemented yet")
 }
