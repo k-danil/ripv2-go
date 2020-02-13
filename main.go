@@ -18,7 +18,7 @@ func main() {
 
 	//Receive packet in buffer
 	for {
-		b := make([]byte, 504) //Maximum size of RIP pdu - 504byte
+		b := make([]byte, 514) //Maximum size of RIP pdu - 504byte
 		s, cm, _, err := p.ReadFrom(b)
 		if err != nil {
 			log.Fatal(err)
@@ -37,7 +37,7 @@ func main() {
 				if err != nil {
 					log.Println(err)
 				}
-				log.Printf("%v", r.pdu)
+				log.Printf("%+v", r.pdu)
 			}()
 		}
 	}
