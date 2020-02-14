@@ -15,6 +15,8 @@ func main() {
 	interfaces := []string{"br0"}
 	pass := "123"
 
+	a := initTable()
+
 	//Listen for multicast on interfaces
 	p := socket(interfaces)
 	defer socketClose(p, interfaces)
@@ -40,6 +42,7 @@ func main() {
 				if err != nil {
 					log.Println(err)
 				}
+				a.pduToAdj(m)
 				log.Printf("%+v", m)
 			}()
 		}
