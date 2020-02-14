@@ -20,12 +20,13 @@ const (
 )
 
 type pdu struct {
-	header       header
-	routeEntries []routeEntry
-	authType     uint16
-	authEntry    authEntry
-	authKeyEntry []byte
-	err          bool
+	serviceFields serviceFields
+	header        header
+	routeEntries  []routeEntry
+	authType      uint16
+	authEntry     authEntry
+	authKeyEntry  []byte
+	err           bool
 }
 
 type header struct {
@@ -52,6 +53,11 @@ type authEntry struct {
 	sqn     uint32
 }
 
+type serviceFields struct {
+	srcIP uint32
+	srcIf uint16
+}
+
 type packet struct {
 	src     net.IP
 	ifi     int
@@ -65,6 +71,10 @@ func read(content []byte, ifIndex int, src net.IP) (*packet, error) {
 }
 
 func (p *packet) parser() {
+	p.pdu.serviceFields = serviceFields{
+		srcIP: binary.BigEndian.Uint32(p.src),
+		srcIf: uint16(p.ifi),
+	}
 	p.pdu.header = header{
 		command: uint8(p.content[0]),
 		version: uint8(p.content[1]),
@@ -107,33 +117,35 @@ func (p *packet) parser() {
 	}
 }
 
-func (p *packet) validator(pass string) error {
+func (p *packet) validator(pass string) (*pdu, error) {
 	if p.pdu.header.version != 2 {
-		return errors.New("Incorrect RIP version (use 2)")
+		return nil, errors.New("Incorrect RIP version (use 2)")
 	}
 	switch p.pdu.authType {
 	case authPlain:
 		err := p.authPlain(pass)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case authHash:
 		err := p.authHash(pass)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for l := 0; l < len(p.pdu.routeEntries); l++ {
 		if p.pdu.routeEntries[l].metric > 16 {
 			p.pdu.routeEntries[l].err = true
-			return errors.New("Bad metric")
+			return nil, errors.New("Bad metric")
 		} else if !net.IP(uintToIP(p.pdu.routeEntries[l].ip)).IsGlobalUnicast() {
 			p.pdu.routeEntries[l].err = true
-			return errors.New("Bad address")
+			return nil, errors.New("Bad address")
 		}
 	}
 
-	return nil
+	pdu := &p.pdu
+
+	return pdu, nil
 }
 
 func (p *packet) authPlain(pass string) error {

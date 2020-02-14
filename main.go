@@ -7,6 +7,9 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
+type keyChain struct {
+}
+
 func main() {
 
 	interfaces := []string{"br0"}
@@ -33,11 +36,11 @@ func main() {
 				//Parse payload
 				r.parser()
 				//Validate over RFC guidline and authenticate with pass
-				err = r.validator(pass)
+				m, err := r.validator(pass)
 				if err != nil {
 					log.Println(err)
 				}
-				log.Printf("%+v", r.pdu)
+				log.Printf("%+v", m)
 			}()
 		}
 	}
