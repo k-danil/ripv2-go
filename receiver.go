@@ -156,12 +156,9 @@ func (p *packet) authHash(pass string) error {
 	tcont = append(tcont, pa...)
 	hash := md5.Sum(tcont)
 
-	thash := make([]byte, 0)
-	thash = append(thash, hash[:]...)
-
-	if !bytes.Equal(thash, p.pdu.authKeyEntry) {
+	if !bytes.Equal(hash[:], p.pdu.authKeyEntry) {
 		p.pdu.err = true
-		return errors.New("Unauthenticated md5 pass pdu")
+		return errors.New("Unauthenticated md5 pdu")
 	}
 	return nil
 }
