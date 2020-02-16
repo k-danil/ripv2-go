@@ -15,8 +15,9 @@ const (
 )
 
 const (
-	afiAuth uint16 = 65535
-	afiIPv4 uint16 = 2
+	afiAuth    uint16 = 65535
+	afiIPv4    uint16 = 2
+	afiGiveAll uint16 = 0
 )
 
 type pdu struct {
@@ -26,7 +27,7 @@ type pdu struct {
 	authType      uint16
 	authEntry     authEntry
 	authKeyEntry  []byte
-	err           bool
+	invalid       bool
 }
 
 type header struct {
@@ -36,14 +37,13 @@ type header struct {
 }
 
 type routeEntry struct {
-	ip     uint32
-	mask   uint32
-	nh     uint32
-	gw     uint32
-	metric uint32
-	afi    uint16
-	rt     uint16
-	err    bool
+	network  uint32
+	mask     uint32
+	nextHop  uint32
+	metric   uint32
+	afi      uint16
+	routeTag uint16
+	invalid  bool
 }
 
 type authEntry struct {
@@ -104,12 +104,18 @@ func (p *packet) parser() {
 			}
 		case afiIPv4:
 			routeEntry := routeEntry{
-				afi:    afi,
-				rt:     binary.BigEndian.Uint16(offset[2:4]),
-				ip:     binary.BigEndian.Uint32(offset[4:8]),
-				mask:   binary.BigEndian.Uint32(offset[8:12]),
-				nh:     binary.BigEndian.Uint32(offset[12:16]),
-				metric: binary.BigEndian.Uint32(offset[16:20]),
+				afi:      afi,
+				routeTag: binary.BigEndian.Uint16(offset[2:4]),
+				network:  binary.BigEndian.Uint32(offset[4:8]),
+				mask:     binary.BigEndian.Uint32(offset[8:12]),
+				nextHop:  binary.BigEndian.Uint32(offset[12:16]),
+				metric:   binary.BigEndian.Uint32(offset[16:20]),
+			}
+			p.pdu.routeEntries = append(p.pdu.routeEntries, routeEntry)
+		case afiGiveAll:
+			routeEntry := routeEntry{
+				afi:     afi,
+				network: binary.BigEndian.Uint32(offset[4:8]),
 			}
 			p.pdu.routeEntries = append(p.pdu.routeEntries, routeEntry)
 		}
@@ -133,13 +139,15 @@ func (p *packet) validator(pass string) (*pdu, error) {
 			return nil, err
 		}
 	}
-	for l := 0; l < len(p.pdu.routeEntries); l++ {
-		if p.pdu.routeEntries[l].metric > 16 {
-			p.pdu.routeEntries[l].err = true
-			return nil, errors.New("Bad metric")
-		} else if !net.IP(uintToIP(p.pdu.routeEntries[l].ip)).IsGlobalUnicast() {
-			p.pdu.routeEntries[l].err = true
-			return nil, errors.New("Bad address")
+	if p.pdu.header.command == response {
+		for l := 0; l < len(p.pdu.routeEntries); l++ {
+			if p.pdu.routeEntries[l].metric > 16 {
+				p.pdu.routeEntries[l].invalid = true
+				return nil, errors.New("Bad metric")
+			} else if !net.IP(uintToIP(p.pdu.routeEntries[l].network)).IsGlobalUnicast() {
+				p.pdu.routeEntries[l].invalid = true
+				return nil, errors.New("Bad address")
+			}
 		}
 	}
 
@@ -150,7 +158,7 @@ func (p *packet) validator(pass string) (*pdu, error) {
 
 func (p *packet) authPlain(pass string) error {
 	if string(p.pdu.authKeyEntry) != pass {
-		p.pdu.err = true
+		p.pdu.invalid = true
 		return errors.New("Unauthenticated plain pass pdu")
 	}
 	return nil
@@ -169,7 +177,7 @@ func (p *packet) authHash(pass string) error {
 	hash := md5.Sum(tcont)
 
 	if !bytes.Equal(hash[:], p.pdu.authKeyEntry) {
-		p.pdu.err = true
+		p.pdu.invalid = true
 		return errors.New("Unauthenticated md5 pdu")
 	}
 	return nil

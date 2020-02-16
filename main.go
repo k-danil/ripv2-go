@@ -37,13 +37,15 @@ func main() {
 				}
 				//Parse payload
 				r.parser()
+				// log.Printf("%+v", r)
 				//Validate over RFC guidline and authenticate with pass
 				m, err := r.validator(pass)
+				// log.Printf("%+v", m)
 				if err != nil {
 					log.Println(err)
 				}
-				a.pduToAdj(m)
-				log.Printf("%+v", m)
+				a.pduProcessor(m)
+
 			}()
 		}
 	}
