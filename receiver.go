@@ -20,6 +20,13 @@ const (
 	afiGiveAll uint16 = 0
 )
 
+type packet struct {
+	src     net.IP
+	ifi     int
+	content []byte
+	pdu     pdu
+}
+
 type pdu struct {
 	serviceFields serviceFields
 	header        header
@@ -56,13 +63,6 @@ type authEntry struct {
 type serviceFields struct {
 	srcIP uint32
 	srcIf uint16
-}
-
-type packet struct {
-	src     net.IP
-	ifi     int
-	content []byte
-	pdu     pdu
 }
 
 func read(content []byte, ifIndex int, src net.IP) (*packet, error) {

@@ -20,24 +20,24 @@ const (
 	infMetric uint32 = 16
 )
 
-type adj struct {
-	ip      uint32
-	mask    uint32
-	nextHop uint32
-	ifi     uint16
-	metric  uint32
-	timeout int64
-	kill    bool
-	change  bool
+type adjTable struct {
+	entry map[uint64]*adj
 }
 
-type adjTable struct {
-	entry map[uint32]*adj
+type adj struct {
+	ip        uint32
+	mask      uint32
+	nextHop   uint32
+	ifi       uint16
+	metric    uint32
+	timestamp int64
+	kill      bool
+	change    bool
 }
 
 func initTable() *adjTable {
 	a := &adjTable{}
-	a.entry = make(map[uint32]*adj)
+	a.entry = make(map[uint64]*adj)
 	go a.scheduler()
 	return a
 }
@@ -65,7 +65,7 @@ func (a *adjTable) pduProcessor(p *pdu) {
 func (a *adjTable) clearAdj() {
 	ctime := time.Now().Unix()
 	for key, val := range a.entry {
-		switch timer := ctime - val.timeout; {
+		switch timer := ctime - val.timestamp; {
 		case timer > (garbageTimer + timeoutTimer):
 			if val.kill {
 				delete(a.entry, key)
@@ -85,11 +85,12 @@ func (a *adjTable) processRequest(p *pdu) {
 		log.Println("TODO Trigger full table response")
 		return
 	}
-	for _, entry := range p.routeEntries {
-		if a.entry[entry.network] == nil {
-			entry.metric = infMetric
+	for _, pEnt := range p.routeEntries {
+		netid := ipmask(pEnt.network, pEnt.mask)
+		if a.entry[netid] == nil {
+			pEnt.metric = infMetric
 		} else {
-			entry.metric = a.entry[entry.network].metric
+			pEnt.metric = a.entry[netid].metric
 		}
 	}
 	log.Println("TODO Trigger response")
@@ -98,56 +99,62 @@ func (a *adjTable) processRequest(p *pdu) {
 func (a *adjTable) processResponse(p *pdu) {
 	ctime := time.Now().Unix()
 	for _, pEnt := range p.routeEntries {
-		if a.entry[pEnt.network] == nil {
+		netid := ipmask(pEnt.network, pEnt.mask)
+		if a.entry[netid] == nil {
 			if pEnt.metric != infMetric {
-				a.entry[pEnt.network] = &adj{
-					ip:      pEnt.network,
-					mask:    pEnt.mask,
-					nextHop: p.serviceFields.srcIP,
-					ifi:     p.serviceFields.srcIf,
-					metric:  pEnt.metric,
-					timeout: ctime,
-					change:  true,
+				a.entry[netid] = &adj{
+					ip:        pEnt.network,
+					mask:      pEnt.mask,
+					nextHop:   p.serviceFields.srcIP,
+					ifi:       p.serviceFields.srcIf,
+					metric:    pEnt.metric,
+					timestamp: ctime,
+					change:    true,
 				}
 			}
 		} else {
-			if a.entry[pEnt.network].nextHop == p.serviceFields.srcIP {
+			// TODO next hop from pdu
+			if a.entry[netid].nextHop == p.serviceFields.srcIP {
 				switch metric := pEnt.metric; {
 				case metric == infMetric:
-					if a.entry[pEnt.network].metric != infMetric {
-						a.entry[pEnt.network].metric = metric
-						a.entry[pEnt.network].change = true
-						a.entry[pEnt.network].kill = true
+					if a.entry[netid].metric != infMetric {
+						a.entry[netid].metric = metric
+						a.entry[netid].change = true
+						a.entry[netid].kill = true
 					}
-				case metric < a.entry[pEnt.network].metric:
-					a.entry[pEnt.network].timeout = ctime
-					a.entry[pEnt.network].metric = metric
-					a.entry[pEnt.network].change = true
-					a.entry[pEnt.network].kill = false
-				case metric > a.entry[pEnt.network].metric:
-				case metric == a.entry[pEnt.network].metric:
-					a.entry[pEnt.network].timeout = ctime
+				case metric < a.entry[netid].metric:
+					a.entry[netid].timestamp = ctime
+					a.entry[netid].metric = metric
+					a.entry[netid].change = true
+					a.entry[netid].kill = false
+				case metric == a.entry[netid].metric:
+					a.entry[netid].timestamp = ctime
 				}
 			} else {
 				switch metric := pEnt.metric; {
-				case metric == a.entry[pEnt.network].metric:
-					if a.entry[pEnt.network].kill == true {
-						a.entry[pEnt.network].nextHop = p.serviceFields.srcIP
-						a.entry[pEnt.network].ifi = p.serviceFields.srcIf
-						a.entry[pEnt.network].timeout = ctime
-						a.entry[pEnt.network].metric = metric
-						a.entry[pEnt.network].change = true
-						a.entry[pEnt.network].kill = false
+				case metric == a.entry[netid].metric:
+					if a.entry[netid].kill == true {
+						a.entry[netid].nextHop = p.serviceFields.srcIP
+						a.entry[netid].ifi = p.serviceFields.srcIf
+						a.entry[netid].timestamp = ctime
+						a.entry[netid].metric = metric
+						a.entry[netid].change = true
+						a.entry[netid].kill = false
 					}
-				case metric < a.entry[pEnt.network].metric:
-					a.entry[pEnt.network].nextHop = p.serviceFields.srcIP
-					a.entry[pEnt.network].ifi = p.serviceFields.srcIf
-					a.entry[pEnt.network].timeout = ctime
-					a.entry[pEnt.network].metric = metric
-					a.entry[pEnt.network].change = true
-					a.entry[pEnt.network].kill = false
+				case metric < a.entry[netid].metric:
+					a.entry[netid].nextHop = p.serviceFields.srcIP
+					a.entry[netid].ifi = p.serviceFields.srcIf
+					a.entry[netid].timestamp = ctime
+					a.entry[netid].metric = metric
+					a.entry[netid].change = true
+					a.entry[netid].kill = false
 				}
 			}
 		}
 	}
+}
+
+func ipmask(ip, mask uint32) uint64 {
+	im := (uint64(ip) << 32) | uint64(mask)
+	return im
 }
