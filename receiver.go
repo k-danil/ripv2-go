@@ -116,6 +116,7 @@ func (p *packet) parser() {
 			routeEntry := routeEntry{
 				afi:     afi,
 				network: binary.BigEndian.Uint32(offset[4:8]),
+				metric:  binary.BigEndian.Uint32(offset[16:20]),
 			}
 			p.pdu.routeEntries = append(p.pdu.routeEntries, routeEntry)
 		}

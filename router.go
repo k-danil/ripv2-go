@@ -43,9 +43,15 @@ func initTable() *adjTable {
 }
 
 func (a *adjTable) scheduler() {
+	tcleaner := time.NewTicker(1 * time.Second)
+	tupdate := time.NewTicker(time.Duration(updateTimer) * time.Second)
 	for {
-		a.clearAdj()
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-tupdate.C:
+			log.Println("TODO Out going update")
+		case <-tcleaner.C:
+			a.clearAdj()
+		}
 	}
 }
 
