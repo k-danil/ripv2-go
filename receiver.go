@@ -145,7 +145,7 @@ func (p *packet) validator(pass string) (*pdu, error) {
 			if p.pdu.routeEntries[l].metric > 16 {
 				p.pdu.routeEntries[l].invalid = true
 				return nil, errors.New("Bad metric")
-			} else if !net.IP(uintToIP(p.pdu.routeEntries[l].network)).IsGlobalUnicast() {
+			} else if net.IP(uintToIP(p.pdu.routeEntries[l].network)).IsLoopback() {
 				p.pdu.routeEntries[l].invalid = true
 				return nil, errors.New("Bad address")
 			}

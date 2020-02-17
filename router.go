@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,7 @@ const (
 
 type adjTable struct {
 	entry map[uint64]*adj
+	mux   sync.Mutex
 }
 
 type adj struct {
@@ -43,13 +45,18 @@ func initTable() *adjTable {
 }
 
 func (a *adjTable) scheduler() {
-	tcleaner := time.NewTicker(1 * time.Second)
-	tupdate := time.NewTicker(time.Duration(updateTimer) * time.Second)
+	tWorker := time.NewTicker(1 * time.Second)
+	tKeepAlive := time.NewTicker(time.Duration(updateTimer) * time.Second)
 	for {
 		select {
-		case <-tupdate.C:
+		case <-tKeepAlive.C:
+			a.pduProcessor(getLocalTable())
 			log.Println("TODO Out going update")
-		case <-tcleaner.C:
+			log.Printf("%+v", a)
+			for _, val := range a.entry {
+				log.Printf("%+v", val)
+			}
+		case <-tWorker.C:
 			a.clearAdj()
 		}
 	}
@@ -62,13 +69,10 @@ func (a *adjTable) pduProcessor(p *pdu) {
 	case response:
 		a.processResponse(p)
 	}
-	log.Printf("%+v", a)
-	for _, val := range a.entry {
-		log.Printf("%+v", val)
-	}
 }
 
 func (a *adjTable) clearAdj() {
+	a.mux.Lock()
 	ctime := time.Now().Unix()
 	for key, val := range a.entry {
 		switch timer := ctime - val.timestamp; {
@@ -84,11 +88,14 @@ func (a *adjTable) clearAdj() {
 			}
 		}
 	}
+	a.mux.Unlock()
 }
 
 func (a *adjTable) processRequest(p *pdu) {
+	a.mux.Lock()
 	if p.routeEntries[0].metric == infMetric && p.routeEntries[0].network == 0 {
 		log.Println("TODO Trigger full table response")
+		a.mux.Unlock()
 		return
 	}
 	for _, pEnt := range p.routeEntries {
@@ -100,28 +107,38 @@ func (a *adjTable) processRequest(p *pdu) {
 		}
 	}
 	log.Println("TODO Trigger response")
+	a.mux.Unlock()
 }
 
 func (a *adjTable) processResponse(p *pdu) {
+	a.mux.Lock()
 	ctime := time.Now().Unix()
 	for _, pEnt := range p.routeEntries {
+		//Calculate id to map
 		netid := ipmask(pEnt.network, pEnt.mask)
+		//Default next-hop is 0.0.0.0 but it can be anything else
+		var srcIP uint32
+		if pEnt.nextHop != 0 {
+			srcIP = pEnt.nextHop
+		} else {
+			srcIP = p.serviceFields.srcIP
+		}
+
 		if a.entry[netid] == nil {
-			if pEnt.metric != infMetric {
+			if (pEnt.metric + 1) < infMetric {
 				a.entry[netid] = &adj{
 					ip:        pEnt.network,
 					mask:      pEnt.mask,
-					nextHop:   p.serviceFields.srcIP,
+					nextHop:   srcIP,
 					ifi:       p.serviceFields.srcIf,
-					metric:    pEnt.metric,
+					metric:    pEnt.metric + 1,
 					timestamp: ctime,
 					change:    true,
 				}
 			}
 		} else {
-			// TODO next hop from pdu
-			if a.entry[netid].nextHop == p.serviceFields.srcIP {
-				switch metric := pEnt.metric; {
+			if a.entry[netid].nextHop == srcIP {
+				switch metric := pEnt.metric + 1; {
 				case metric == infMetric:
 					if a.entry[netid].metric != infMetric {
 						a.entry[netid].metric = metric
@@ -137,10 +154,10 @@ func (a *adjTable) processResponse(p *pdu) {
 					a.entry[netid].timestamp = ctime
 				}
 			} else {
-				switch metric := pEnt.metric; {
+				switch metric := pEnt.metric + 1; {
 				case metric == a.entry[netid].metric:
 					if a.entry[netid].kill == true {
-						a.entry[netid].nextHop = p.serviceFields.srcIP
+						a.entry[netid].nextHop = srcIP
 						a.entry[netid].ifi = p.serviceFields.srcIf
 						a.entry[netid].timestamp = ctime
 						a.entry[netid].metric = metric
@@ -148,7 +165,7 @@ func (a *adjTable) processResponse(p *pdu) {
 						a.entry[netid].kill = false
 					}
 				case metric < a.entry[netid].metric:
-					a.entry[netid].nextHop = p.serviceFields.srcIP
+					a.entry[netid].nextHop = srcIP
 					a.entry[netid].ifi = p.serviceFields.srcIf
 					a.entry[netid].timestamp = ctime
 					a.entry[netid].metric = metric
@@ -158,7 +175,22 @@ func (a *adjTable) processResponse(p *pdu) {
 			}
 		}
 	}
+	a.mux.Unlock()
 }
+
+// func (a *adjTable) outgoingAdj(changed bool) *pdu {
+// 	pdu := &pdu{
+// 		header: header{command: 2, version: 2},
+// 	}
+// 	for aEnt := range a.entry {
+// 		switch changed {
+// 		case true:
+
+// 		case false:
+// 		}
+// 	}
+// 	return pdu
+// }
 
 func ipmask(ip, mask uint32) uint64 {
 	im := (uint64(ip) << 32) | uint64(mask)

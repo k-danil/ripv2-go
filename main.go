@@ -43,9 +43,9 @@ func main() {
 				// log.Printf("%+v", m)
 				if err != nil {
 					log.Println(err)
+				} else {
+					a.pduProcessor(m)
 				}
-				a.pduProcessor(m)
-
 			}()
 		}
 	}
