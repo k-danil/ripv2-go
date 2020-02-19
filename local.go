@@ -6,9 +6,16 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func getLocalTable() *pdu {
-	link, _ := netlink.LinkByName("lo")
-	iplist, _ := netlink.AddrList(link, netlink.FAMILY_V4)
+func getLocalTable(ifc string) (*pdu, error) {
+	link, err := netlink.LinkByName(ifc)
+	if err != nil {
+		return nil, err
+	}
+	iplist, err := netlink.AddrList(link, netlink.FAMILY_V4)
+	if err != nil {
+		return nil, err
+	}
+	// TODO Check interface state
 	pdu := &pdu{
 		header: header{
 			version: 2,
@@ -32,5 +39,6 @@ func getLocalTable() *pdu {
 		}
 		pdu.routeEntries = append(pdu.routeEntries, routeEntry)
 	}
-	return pdu
+
+	return pdu, nil
 }

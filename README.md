@@ -1,2 +1,2 @@
 # ripv2-go
-Golang ripv2 daemon
+Simple ripv2 daemon for linux

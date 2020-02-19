@@ -67,6 +67,7 @@ type serviceFields struct {
 
 func read(content []byte, ifIndex int, src net.IP) (*packet, error) {
 	p := &packet{src: src, ifi: ifIndex, content: content}
+
 	return p, nil
 }
 
@@ -144,9 +145,11 @@ func (p *packet) validator(pass string) (*pdu, error) {
 		for l := 0; l < len(p.pdu.routeEntries); l++ {
 			if p.pdu.routeEntries[l].metric > 16 {
 				p.pdu.routeEntries[l].invalid = true
+
 				return nil, errors.New("Bad metric")
 			} else if net.IP(uintToIP(p.pdu.routeEntries[l].network)).IsLoopback() {
 				p.pdu.routeEntries[l].invalid = true
+
 				return nil, errors.New("Bad address")
 			}
 		}
@@ -162,6 +165,7 @@ func (p *packet) authPlain(pass string) error {
 		p.pdu.invalid = true
 		return errors.New("Unauthenticated plain pass pdu")
 	}
+
 	return nil
 }
 
@@ -179,8 +183,10 @@ func (p *packet) authHash(pass string) error {
 
 	if !bytes.Equal(hash[:], p.pdu.authKeyEntry) {
 		p.pdu.invalid = true
+
 		return errors.New("Unauthenticated md5 pdu")
 	}
+
 	return nil
 }
 
@@ -190,5 +196,6 @@ func uintToIP(ip uint32) net.IP {
 	result[1] = byte(ip >> 8)
 	result[2] = byte(ip >> 16)
 	result[3] = byte(ip >> 24)
+
 	return result
 }

@@ -41,17 +41,26 @@ func initTable() *adjTable {
 	a := &adjTable{}
 	a.entry = make(map[uint64]*adj)
 	go a.scheduler()
+
 	return a
 }
 
 func (a *adjTable) scheduler() {
-	tWorker := time.NewTicker(1 * time.Second)
+	tWorker := time.NewTicker(5 * time.Second)
 	tKeepAlive := time.NewTicker(time.Duration(updateTimer) * time.Second)
 	for {
 		select {
 		case <-tKeepAlive.C:
-			a.pduProcessor(getLocalTable())
-			log.Println("TODO Out going update")
+			//TODO Move to subscriptions
+			l, err := getLocalTable("lo")
+			if err != nil {
+				log.Println(err)
+			} else {
+				a.pduProcessor(l)
+			}
+
+			log.Println("TODO Outgoing update")
+
 			log.Printf("%+v", a)
 			for _, val := range a.entry {
 				log.Printf("%+v", val)
@@ -96,6 +105,7 @@ func (a *adjTable) processRequest(p *pdu) {
 	if p.routeEntries[0].metric == infMetric && p.routeEntries[0].network == 0 {
 		log.Println("TODO Trigger full table response")
 		a.mux.Unlock()
+
 		return
 	}
 	for _, pEnt := range p.routeEntries {
@@ -194,5 +204,6 @@ func (a *adjTable) processResponse(p *pdu) {
 
 func ipmask(ip, mask uint32) uint64 {
 	im := (uint64(ip) << 32) | uint64(mask)
+
 	return im
 }
