@@ -61,7 +61,7 @@ func (a *adjTable) scheduler() {
 
 			log.Println("TODO Outgoing update")
 
-			log.Printf("%+v", a)
+			// log.Printf("%+v", a)
 			for _, val := range a.entry {
 				log.Printf("%+v", val)
 			}
@@ -82,6 +82,7 @@ func (a *adjTable) pduProcessor(p *pdu) {
 
 func (a *adjTable) clearAdj() {
 	a.mux.Lock()
+	defer a.mux.Unlock()
 	ctime := time.Now().Unix()
 	for key, val := range a.entry {
 		switch timer := ctime - val.timestamp; {
@@ -97,15 +98,13 @@ func (a *adjTable) clearAdj() {
 			}
 		}
 	}
-	a.mux.Unlock()
 }
 
 func (a *adjTable) processRequest(p *pdu) {
 	a.mux.Lock()
+	defer a.mux.Unlock()
 	if p.routeEntries[0].metric == infMetric && p.routeEntries[0].network == 0 {
 		log.Println("TODO Trigger full table response")
-		a.mux.Unlock()
-
 		return
 	}
 	for _, pEnt := range p.routeEntries {
@@ -117,11 +116,11 @@ func (a *adjTable) processRequest(p *pdu) {
 		}
 	}
 	log.Println("TODO Trigger response")
-	a.mux.Unlock()
 }
 
 func (a *adjTable) processResponse(p *pdu) {
 	a.mux.Lock()
+	defer a.mux.Unlock()
 	ctime := time.Now().Unix()
 	for _, pEnt := range p.routeEntries {
 		//Calculate id to map
@@ -185,7 +184,6 @@ func (a *adjTable) processResponse(p *pdu) {
 			}
 		}
 	}
-	a.mux.Unlock()
 }
 
 // func (a *adjTable) outgoingAdj(changed bool) *pdu {

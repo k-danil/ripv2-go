@@ -3,23 +3,19 @@ package main
 import (
 	"log"
 	"net"
-
-	"golang.org/x/net/ipv4"
 )
 
-type keyChain struct {
-}
-
 func main() {
-
-	interfaces := []string{"br0"}
-	pass := "123"
+	conf, err := readConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	a := initTable()
 
 	//Listen for multicast on interfaces
-	p := socket(interfaces)
-	defer socketClose(p, interfaces)
+	p := socket(conf)
+	defer socketClose(p, conf)
 
 	//Receive packet in buffer
 	for {
@@ -31,7 +27,8 @@ func main() {
 			//Process received packet
 			go func() {
 				//Fill service fields and payload to struct
-				r, err := read(b[:s], cm.IfIndex, cm.Src)
+				ifi, _ := net.InterfaceByIndex(cm.IfIndex)
+				r, err := read(b[:s], cm.IfIndex, cm.Src, ifi.Name)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -39,7 +36,7 @@ func main() {
 				r.parser()
 				// log.Printf("%+v", r)
 				//Validate over RFC guidline and authenticate with pass
-				m, err := r.validator(pass)
+				m, err := r.validator(conf)
 				// log.Printf("%+v", m)
 				if err != nil {
 					log.Println(err)
@@ -49,44 +46,4 @@ func main() {
 			}()
 		}
 	}
-}
-
-func socket(ifcn []string) *ipv4.PacketConn {
-	mrip := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
-
-	c, err := net.ListenPacket("udp4", "0.0.0.0:520")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	p := ipv4.NewPacketConn(c)
-
-	for _, ifc := range ifcn {
-		ifi, err := net.InterfaceByName(ifc)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := p.JoinGroup(ifi, &mrip); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	if err := p.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		log.Fatal(err)
-	}
-
-	return p
-}
-
-func socketClose(p *ipv4.PacketConn, ifcn []string) {
-	mrip := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
-
-	for _, ifc := range ifcn {
-		ifi, err := net.InterfaceByName(ifc)
-		if err != nil {
-			log.Fatal(err)
-		}
-		p.LeaveGroup(ifi, &mrip)
-	}
-	p.Close()
 }

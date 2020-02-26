@@ -1,0 +1,13 @@
+[timers]
+updateTimer = 30
+timeoutTimer = 180
+garbageTimer = 120
+
+[interfaces]
+ [interfaces.br0]
+ auth = true
+   [interfaces.br0.keychain]
+   authType = 3
+   authKey = "123"
+ [interfaces.lo]
+ passive = true

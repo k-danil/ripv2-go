@@ -23,6 +23,7 @@ const (
 type packet struct {
 	src     net.IP
 	ifi     int
+	ifn     string
 	content []byte
 	pdu     pdu
 }
@@ -31,6 +32,7 @@ type pdu struct {
 	serviceFields serviceFields
 	header        header
 	routeEntries  []routeEntry
+	auth          bool
 	authType      uint16
 	authEntry     authEntry
 	authKeyEntry  []byte
@@ -65,8 +67,12 @@ type serviceFields struct {
 	srcIf uint16
 }
 
-func read(content []byte, ifIndex int, src net.IP) (*packet, error) {
-	p := &packet{src: src, ifi: ifIndex, content: content}
+func read(content []byte, ifIndex int, src net.IP, ifName string) (*packet, error) {
+	p := &packet{
+		src:     src,
+		ifi:     ifIndex,
+		ifn:     ifName,
+		content: content}
 
 	return p, nil
 }
@@ -89,6 +95,7 @@ func (p *packet) parser() {
 		}
 		switch afi {
 		case afiAuth:
+			p.pdu.auth = true
 			authType := binary.BigEndian.Uint16(offset[2:4])
 			switch authType {
 			case authKey:
@@ -125,22 +132,30 @@ func (p *packet) parser() {
 	}
 }
 
-func (p *packet) validator(pass string) (*pdu, error) {
+func (p *packet) validator(conf *config) (*pdu, error) {
 	if p.pdu.header.version != 2 {
 		return nil, errors.New("Incorrect RIP version (use 2)")
 	}
-	switch p.pdu.authType {
-	case authPlain:
-		err := p.authPlain(pass)
-		if err != nil {
-			return nil, err
+
+	if p.pdu.auth && conf.Interfaces[p.ifn].Auth {
+		if p.pdu.authType != conf.Interfaces[p.ifn].KeyChain.AuthType {
+			return nil, errors.New("Incorrect AuthType")
 		}
-	case authHash:
-		err := p.authHash(pass)
-		if err != nil {
-			return nil, err
+
+		switch p.pdu.authType {
+		case authPlain:
+			err := p.authPlain(conf.Interfaces[p.ifn].KeyChain.AuthKey)
+			if err != nil {
+				return nil, err
+			}
+		case authHash:
+			err := p.authHash(conf.Interfaces[p.ifn].KeyChain.AuthKey)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
+
 	if p.pdu.header.command == response {
 		for l := 0; l < len(p.pdu.routeEntries); l++ {
 			if p.pdu.routeEntries[l].metric > 16 {
