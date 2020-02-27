@@ -6,15 +6,20 @@ import (
 )
 
 func main() {
+	// defer profile.Start(profile.TraceProfile).Stop()
 	conf, err := readConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	a := initTable()
+	a := initTable(conf)
 
 	//Listen for multicast on interfaces
-	p := socket(conf)
+	p, err := socketOpen(conf)
+	if err != nil {
+		log.Fatal(err)
+	}
+	a.connect = p
 	defer socketClose(p, conf)
 
 	//Receive packet in buffer
@@ -23,27 +28,22 @@ func main() {
 		s, cm, _, err := p.ReadFrom(b)
 		if err != nil {
 			log.Fatal(err)
-		} else if s != 0 {
-			//Process received packet
-			go func() {
-				//Fill service fields and payload to struct
-				ifi, _ := net.InterfaceByIndex(cm.IfIndex)
-				r, err := read(b[:s], cm.IfIndex, cm.Src, ifi.Name)
-				if err != nil {
-					log.Fatal(err)
-				}
-				//Parse payload
-				r.parser()
-				// log.Printf("%+v", r)
-				//Validate over RFC guidline and authenticate with pass
-				m, err := r.validator(conf)
-				// log.Printf("%+v", m)
-				if err != nil {
-					log.Println(err)
-				} else {
-					a.pduProcessor(m)
-				}
-			}()
 		}
+		ifc, err := net.InterfaceByIndex(cm.IfIndex)
+		//Process received packet
+		go func() {
+			//Fill service fields and payload to struct
+			r, err := readPacket(b[:s], ifc.Name, cm.Src)
+			if err != nil {
+				log.Fatal(err)
+			}
+			//Validate over RFC guidline and authenticate with pass
+			m, err := r.pduValidator(conf)
+			if err != nil {
+				log.Println(err)
+			} else {
+				a.adjProcess(m)
+			}
+		}()
 	}
 }

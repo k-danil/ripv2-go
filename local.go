@@ -11,6 +11,7 @@ func getLocalTable(ifc string) (*pdu, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	iplist, err := netlink.AddrList(link, netlink.FAMILY_V4)
 	if err != nil {
 		return nil, err
@@ -23,7 +24,7 @@ func getLocalTable(ifc string) (*pdu, error) {
 		},
 		serviceFields: serviceFields{
 			srcIP: binary.BigEndian.Uint32([]byte{127, 0, 0, 1}),
-			srcIf: uint16(link.Attrs().Index),
+			srcIf: link.Attrs().Name,
 		},
 	}
 	for i := 0; i < len(iplist); i++ {

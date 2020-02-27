@@ -5,7 +5,9 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
+	"time"
 )
 
 const (
@@ -22,7 +24,6 @@ const (
 
 type packet struct {
 	src     net.IP
-	ifi     int
 	ifn     string
 	content []byte
 	pdu     pdu
@@ -46,13 +47,13 @@ type header struct {
 }
 
 type routeEntry struct {
+	afi      uint16
+	routeTag uint16
 	network  uint32
 	mask     uint32
 	nextHop  uint32
 	metric   uint32
-	afi      uint16
-	routeTag uint16
-	invalid  bool
+	// invalid  bool
 }
 
 type authEntry struct {
@@ -63,24 +64,31 @@ type authEntry struct {
 }
 
 type serviceFields struct {
-	srcIP uint32
-	srcIf uint16
+	srcIP     uint32
+	srcIf     string
+	timestamp int64
 }
 
-func read(content []byte, ifIndex int, src net.IP, ifName string) (*packet, error) {
+func readPacket(content []byte, ifName string, src net.IP) (*packet, error) {
 	p := &packet{
 		src:     src,
-		ifi:     ifIndex,
 		ifn:     ifName,
-		content: content}
+		content: content,
+	}
+
+	fmt.Printf("%v \n", content)
+
+	p.parser()
 
 	return p, nil
 }
 
 func (p *packet) parser() {
+
 	p.pdu.serviceFields = serviceFields{
-		srcIP: binary.BigEndian.Uint32(p.src),
-		srcIf: uint16(p.ifi),
+		srcIP:     binary.BigEndian.Uint32(p.src),
+		srcIf:     p.ifn,
+		timestamp: time.Now().Unix(),
 	}
 	p.pdu.header = header{
 		command: uint8(p.content[0]),
@@ -132,38 +140,49 @@ func (p *packet) parser() {
 	}
 }
 
-func (p *packet) validator(conf *config) (*pdu, error) {
+func (p *packet) pduValidator(conf *config) (*pdu, error) {
 	if p.pdu.header.version != 2 {
 		return nil, errors.New("Incorrect RIP version (use 2)")
 	}
 
-	if p.pdu.auth && conf.Interfaces[p.ifn].Auth {
-		if p.pdu.authType != conf.Interfaces[p.ifn].KeyChain.AuthType {
-			return nil, errors.New("Incorrect AuthType")
-		}
+	//TODO cache call to netlink
 
-		switch p.pdu.authType {
-		case authPlain:
-			err := p.authPlain(conf.Interfaces[p.ifn].KeyChain.AuthKey)
-			if err != nil {
-				return nil, err
+	switch p.pdu.auth {
+	case true:
+		if conf.Interfaces[p.ifn].Auth {
+			if p.pdu.authType != conf.Interfaces[p.ifn].KeyChain.AuthType {
+				return nil, errors.New("Incorrect AuthType")
 			}
-		case authHash:
-			err := p.authHash(conf.Interfaces[p.ifn].KeyChain.AuthKey)
-			if err != nil {
-				return nil, err
+
+			switch p.pdu.authType {
+			case authPlain:
+				err := p.authPlain(conf.Interfaces[p.ifn].KeyChain.AuthKey)
+				if err != nil {
+					return nil, err
+				}
+			case authHash:
+				err := p.authHash(conf.Interfaces[p.ifn].KeyChain.AuthKey)
+				if err != nil {
+					return nil, err
+				}
 			}
+		} else {
+			return nil, errors.New("Authentication is not configured on interface")
+		}
+	case false:
+		if conf.Interfaces[p.ifn].Auth {
+			return nil, errors.New("Expect authenticated packet on interface")
 		}
 	}
 
 	if p.pdu.header.command == response {
 		for l := 0; l < len(p.pdu.routeEntries); l++ {
 			if p.pdu.routeEntries[l].metric > 16 {
-				p.pdu.routeEntries[l].invalid = true
+				// p.pdu.routeEntries[l].invalid = true
 
 				return nil, errors.New("Bad metric")
 			} else if net.IP(uintToIP(p.pdu.routeEntries[l].network)).IsLoopback() {
-				p.pdu.routeEntries[l].invalid = true
+				// p.pdu.routeEntries[l].invalid = true
 
 				return nil, errors.New("Bad address")
 			}
@@ -207,10 +226,10 @@ func (p *packet) authHash(pass string) error {
 
 func uintToIP(ip uint32) net.IP {
 	result := make(net.IP, 4)
-	result[0] = byte(ip)
-	result[1] = byte(ip >> 8)
-	result[2] = byte(ip >> 16)
-	result[3] = byte(ip >> 24)
+	result[3] = byte(ip)
+	result[2] = byte(ip >> 8)
+	result[1] = byte(ip >> 16)
+	result[0] = byte(ip >> 24)
 
 	return result
 }

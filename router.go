@@ -1,15 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
-)
 
-const (
-	updateTimer  int64 = 30
-	timeoutTimer int64 = 180
-	garbageTimer int64 = 120
+	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -21,86 +18,102 @@ const (
 	infMetric uint32 = 16
 )
 
+const (
+	regular uint8 = 1
+	changed uint8 = 2
+)
+
 type adjTable struct {
-	entry map[uint64]*adj
-	mux   sync.Mutex
+	entry   map[uint64]*adj
+	mux     sync.Mutex
+	connect *ipv4.PacketConn //Ugly shit
+	change  bool
 }
 
 type adj struct {
 	ip        uint32
 	mask      uint32
 	nextHop   uint32
-	ifi       uint16
+	ifn       string
 	metric    uint32
 	timestamp int64
 	kill      bool
 	change    bool
 }
 
-func initTable() *adjTable {
+func (a *adj) String() string {
+	return fmt.Sprintf(
+		"{ip:%v mask:%v nextHop:%v ifi:%v metric:%v timestamp:%v kill:%v change:%v}",
+		uintToIP(a.ip), uintToIP(a.mask), uintToIP(a.nextHop), a.ifn, a.metric, a.timestamp, a.kill, a.change,
+	)
+}
+
+func initTable(c *config) *adjTable {
 	a := &adjTable{}
 	a.entry = make(map[uint64]*adj)
-	go a.scheduler()
+	go a.scheduler(c)
 
 	return a
 }
 
-func (a *adjTable) scheduler() {
+func (a *adjTable) scheduler(c *config) {
 	tWorker := time.NewTicker(5 * time.Second)
-	tKeepAlive := time.NewTicker(time.Duration(updateTimer) * time.Second)
+	tKeepAlive := time.NewTicker(time.Duration(c.Timers.UpdateTimer) * time.Second)
 	for {
 		select {
 		case <-tKeepAlive.C:
 			//TODO Move to subscriptions
-			l, err := getLocalTable("lo")
-			if err != nil {
-				log.Println(err)
-			} else {
-				a.pduProcessor(l)
+			for i := range c.Interfaces {
+				l, err := getLocalTable(i)
+				if err != nil {
+					log.Println(err)
+				} else {
+					a.adjProcess(l)
+				}
 			}
 
-			log.Println("TODO Outgoing update")
+			go a.pduPerIf(regular, c)
 
-			// log.Printf("%+v", a)
-			for _, val := range a.entry {
-				log.Printf("%+v", val)
-			}
 		case <-tWorker.C:
-			a.clearAdj()
+			if a.change {
+				go a.pduPerIf(changed, c)
+			}
+			a.adjClear(c)
 		}
 	}
 }
 
-func (a *adjTable) pduProcessor(p *pdu) {
+func (a *adjTable) adjProcess(p *pdu) {
 	switch p.header.command {
 	case request:
-		a.processRequest(p)
+		a.requestProcess(p)
 	case response:
-		a.processResponse(p)
+		a.responseProcess(p)
 	}
 }
 
-func (a *adjTable) clearAdj() {
+func (a *adjTable) adjClear(c *config) {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 	ctime := time.Now().Unix()
 	for key, val := range a.entry {
 		switch timer := ctime - val.timestamp; {
-		case timer > (garbageTimer + timeoutTimer):
+		case timer > (c.Timers.GarbageTimer + c.Timers.TimeoutTimer):
 			if val.kill {
 				delete(a.entry, key)
 			}
-		case timer > timeoutTimer:
+		case timer > c.Timers.TimeoutTimer:
 			if !val.kill {
 				val.metric = infMetric
 				val.change = true
 				val.kill = true
+				a.change = true
 			}
 		}
 	}
 }
 
-func (a *adjTable) processRequest(p *pdu) {
+func (a *adjTable) requestProcess(p *pdu) {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 	if p.routeEntries[0].metric == infMetric && p.routeEntries[0].network == 0 {
@@ -115,10 +128,10 @@ func (a *adjTable) processRequest(p *pdu) {
 			pEnt.metric = a.entry[netid].metric
 		}
 	}
-	log.Println("TODO Trigger response")
+	// p.pduToPacket()
 }
 
-func (a *adjTable) processResponse(p *pdu) {
+func (a *adjTable) responseProcess(p *pdu) {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 	ctime := time.Now().Unix()
@@ -139,11 +152,12 @@ func (a *adjTable) processResponse(p *pdu) {
 					ip:        pEnt.network,
 					mask:      pEnt.mask,
 					nextHop:   srcIP,
-					ifi:       p.serviceFields.srcIf,
+					ifn:       p.serviceFields.srcIf,
 					metric:    pEnt.metric + 1,
 					timestamp: ctime,
 					change:    true,
 				}
+				a.change = true
 			}
 		} else {
 			if a.entry[netid].nextHop == srcIP {
@@ -153,12 +167,14 @@ func (a *adjTable) processResponse(p *pdu) {
 						a.entry[netid].metric = metric
 						a.entry[netid].change = true
 						a.entry[netid].kill = true
+						a.change = true
 					}
 				case metric < a.entry[netid].metric:
 					a.entry[netid].timestamp = ctime
 					a.entry[netid].metric = metric
 					a.entry[netid].change = true
 					a.entry[netid].kill = false
+					a.change = true
 				case metric == a.entry[netid].metric:
 					a.entry[netid].timestamp = ctime
 				}
@@ -167,38 +183,106 @@ func (a *adjTable) processResponse(p *pdu) {
 				case metric == a.entry[netid].metric:
 					if a.entry[netid].kill == true {
 						a.entry[netid].nextHop = srcIP
-						a.entry[netid].ifi = p.serviceFields.srcIf
+						a.entry[netid].ifn = p.serviceFields.srcIf
 						a.entry[netid].timestamp = ctime
-						a.entry[netid].metric = metric
+						a.entry[netid].metric = metric + 1
 						a.entry[netid].change = true
 						a.entry[netid].kill = false
+						a.change = true
 					}
 				case metric < a.entry[netid].metric:
 					a.entry[netid].nextHop = srcIP
-					a.entry[netid].ifi = p.serviceFields.srcIf
+					a.entry[netid].ifn = p.serviceFields.srcIf
 					a.entry[netid].timestamp = ctime
-					a.entry[netid].metric = metric
+					a.entry[netid].metric = metric + 1
 					a.entry[netid].change = true
 					a.entry[netid].kill = false
+					a.change = true
 				}
 			}
 		}
 	}
 }
 
-// func (a *adjTable) outgoingAdj(changed bool) *pdu {
-// 	pdu := &pdu{
-// 		header: header{command: 2, version: 2},
-// 	}
-// 	for aEnt := range a.entry {
-// 		switch changed {
-// 		case true:
+func (a *adjTable) pduPerIf(selector uint8, c *config) {
+	for ifn, ifp := range c.Interfaces {
+		if ifp.Passive {
+			//Not send update to passive interface
+			continue
+		}
 
-// 		case false:
-// 		}
-// 	}
-// 	return pdu
-// }
+		//TODO Limit route entry per pdu
+
+		p := a.adjToPdu(selector, ifn)
+		if p != nil {
+			// p.pduToPacket(c, ifn)
+			sendToSocket(a.connect, p.pduToByte(c, ifn), ifn)
+		}
+
+		//Very bad idea. Place this in separate func
+		if selector == changed {
+			for _, adj := range a.entry {
+				adj.change = false
+			}
+			a.change = false
+		}
+	}
+}
+
+func (a *adjTable) adjToPdu(selector uint8, ifn string) *pdu {
+	a.mux.Lock()
+	defer a.mux.Unlock()
+
+	pdu := &pdu{
+		header: header{command: 2, version: 2},
+	}
+
+	switch selector {
+	case regular:
+		for _, adj := range a.entry {
+			if ifn == adj.ifn {
+				//Split-horizon
+				continue
+			}
+			routeEntry := routeEntry{
+				network:  adj.ip,
+				mask:     adj.mask,
+				nextHop:  0,
+				metric:   adj.metric,
+				afi:      afiIPv4,
+				routeTag: 0,
+			}
+			pdu.routeEntries = append(pdu.routeEntries, routeEntry)
+
+		}
+	case changed:
+		for _, adj := range a.entry {
+			if adj.change {
+				if ifn == adj.ifn {
+					//Split-horizon
+					continue
+				}
+				routeEntry := routeEntry{
+					network:  adj.ip,
+					mask:     adj.mask,
+					nextHop:  0,
+					metric:   adj.metric,
+					afi:      afiIPv4,
+					routeTag: 0,
+				}
+				adj.change = false
+				pdu.routeEntries = append(pdu.routeEntries, routeEntry)
+			}
+		}
+	}
+
+	if len(pdu.routeEntries) > 0 {
+		//Pointless to return zero sized pdu
+		return pdu
+	}
+	return nil
+
+}
 
 func ipmask(ip, mask uint32) uint64 {
 	im := (uint64(ip) << 32) | uint64(mask)

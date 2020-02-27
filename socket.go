@@ -1,48 +1,49 @@
 package main
 
 import (
-	"log"
 	"net"
 
 	"golang.org/x/net/ipv4"
 )
 
-func socket(conf *config) *ipv4.PacketConn {
+func socketOpen(c *config) (*ipv4.PacketConn, error) {
 	mrip := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
 
-	c, err := net.ListenPacket("udp4", "0.0.0.0:520")
+	s, err := net.ListenPacket("udp4", "0.0.0.0:520")
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	p := ipv4.NewPacketConn(c)
+	p := ipv4.NewPacketConn(s)
 
-	for ifc := range conf.Interfaces {
+	for ifc := range c.Interfaces {
 		ifi, err := net.InterfaceByName(ifc)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 		if err := p.JoinGroup(ifi, &mrip); err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 	}
 
 	if err := p.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	return p
+	return p, nil
 }
 
-func socketClose(p *ipv4.PacketConn, conf *config) {
+func socketClose(p *ipv4.PacketConn, c *config) error {
 	mrip := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
 
-	for ifc := range conf.Interfaces {
+	for ifc := range c.Interfaces {
 		ifi, err := net.InterfaceByName(ifc)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		p.LeaveGroup(ifi, &mrip)
 	}
 	p.Close()
+
+	return nil
 }
