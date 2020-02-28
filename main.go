@@ -12,20 +12,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	a := initTable(conf)
-
 	//Listen for multicast on interfaces
-	p, err := socketOpen(conf)
+	s, err := socketOpen(conf)
 	if err != nil {
 		log.Fatal(err)
 	}
-	a.connect = p
-	defer socketClose(p, conf)
+
+	a := initTable(conf, s)
+	defer s.socketClose()
 
 	//Receive packet in buffer
 	for {
 		b := make([]byte, 514) //Maximum size of RIP pdu - 504byte
-		s, cm, _, err := p.ReadFrom(b)
+		s, cm, _, err := s.connect.ReadFrom(b)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -16,6 +16,7 @@ func getLocalTable(ifc string) (*pdu, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	// TODO Check interface state
 	pdu := &pdu{
 		header: header{
@@ -42,4 +43,12 @@ func getLocalTable(ifc string) (*pdu, error) {
 	}
 
 	return pdu, nil
+}
+
+func addLocalRoute() {
+
+}
+
+func removeLocalRoute() {
+
 }

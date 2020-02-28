@@ -5,8 +5,6 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -24,10 +22,10 @@ const (
 )
 
 type adjTable struct {
-	entry   map[uint64]*adj
-	mux     sync.Mutex
-	connect *ipv4.PacketConn //Ugly shit
-	change  bool
+	entry  map[uint64]*adj
+	mux    sync.Mutex
+	socket *socket
+	change bool
 }
 
 type adj struct {
@@ -48,10 +46,20 @@ func (a *adj) String() string {
 	)
 }
 
-func initTable(c *config) *adjTable {
-	a := &adjTable{}
+func initTable(c *config, s *socket) *adjTable {
+	a := &adjTable{socket: s}
 	a.entry = make(map[uint64]*adj)
 	go a.scheduler(c)
+
+	//TODO Move to subscriptions
+	for i := range c.Interfaces {
+		l, err := getLocalTable(i)
+		if err != nil {
+			log.Println(err)
+		} else {
+			a.adjProcess(l)
+		}
+	}
 
 	return a
 }
@@ -62,16 +70,6 @@ func (a *adjTable) scheduler(c *config) {
 	for {
 		select {
 		case <-tKeepAlive.C:
-			//TODO Move to subscriptions
-			for i := range c.Interfaces {
-				l, err := getLocalTable(i)
-				if err != nil {
-					log.Println(err)
-				} else {
-					a.adjProcess(l)
-				}
-			}
-
 			go a.pduPerIf(regular, c)
 
 		case <-tWorker.C:
@@ -117,7 +115,10 @@ func (a *adjTable) requestProcess(p *pdu) {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 	if p.routeEntries[0].metric == infMetric && p.routeEntries[0].network == 0 {
-		log.Println("TODO Trigger full table response")
+		p := a.adjToPdu(1, p.serviceFields.srcIf)
+		if p != nil {
+			a.socket.socketSendMcast(p.pduToByte(a.socket.config, p.serviceFields.srcIf), p.serviceFields.srcIf)
+		}
 		return
 	}
 	for _, pEnt := range p.routeEntries {
@@ -215,8 +216,7 @@ func (a *adjTable) pduPerIf(selector uint8, c *config) {
 
 		p := a.adjToPdu(selector, ifn)
 		if p != nil {
-			// p.pduToPacket(c, ifn)
-			sendToSocket(a.connect, p.pduToByte(c, ifn), ifn)
+			a.socket.socketSendMcast(p.pduToByte(c, ifn), ifn)
 		}
 
 		//Very bad idea. Place this in separate func

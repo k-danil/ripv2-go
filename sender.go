@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/binary"
-	"net"
 	"time"
-
-	"golang.org/x/net/ipv4"
 )
 
 type keyAuth struct {
@@ -25,11 +22,6 @@ type hashAuth struct {
 	blank0   uint64
 }
 
-// func (pdu *pdu) pduToPacket(c *config, ifn string) {
-// 	// log.Printf("%+v", pdu)
-// 	pdu.pduToByte(c, ifn)
-// }
-
 func (pdu *pdu) pduToByte(c *config, ifn string) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, pdu.header)
@@ -37,10 +29,7 @@ func (pdu *pdu) pduToByte(c *config, ifn string) []byte {
 	if c.Interfaces[ifn].Auth {
 		switch c.Interfaces[ifn].KeyChain.AuthType {
 		case authPlain:
-			pass := c.Interfaces[ifn].KeyChain.AuthKey
-			for l := 0; l < 16; l++ {
-				pass += "\x00"
-			}
+			pass := padKey(c.Interfaces[ifn].KeyChain.AuthKey, 16)
 			plain := keyAuth{
 				afi:      afiAuth,
 				authType: authPlain,
@@ -54,7 +43,7 @@ func (pdu *pdu) pduToByte(c *config, ifn string) []byte {
 				authType: authHash,
 				packLng:  uint16(24 + (len(pdu.routeEntries) * 20)),
 				keyID:    1,
-				authLng:  20,
+				authLng:  16,
 				sqn:      uint32(ctime),
 			}
 			binary.Write(buf, binary.BigEndian, hash)
@@ -66,10 +55,7 @@ func (pdu *pdu) pduToByte(c *config, ifn string) []byte {
 	}
 
 	if c.Interfaces[ifn].Auth && c.Interfaces[ifn].KeyChain.AuthType == authHash {
-		pass := c.Interfaces[ifn].KeyChain.AuthKey
-		for l := 0; l < 16; l++ {
-			pass += "\x00"
-		}
+		pass := padKey(c.Interfaces[ifn].KeyChain.AuthKey, 16)
 		key := keyAuth{
 			afi:      afiAuth,
 			authType: authKey,
@@ -84,15 +70,10 @@ func (pdu *pdu) pduToByte(c *config, ifn string) []byte {
 	return buf.Bytes()
 }
 
-func sendToSocket(p *ipv4.PacketConn, data []byte, ifn string) {
-	group := net.IPv4(224, 0, 0, 9)
-	dst := &net.UDPAddr{IP: group, Port: 520}
-	ifi, _ := net.InterfaceByName(ifn)
-	if err := p.SetMulticastInterface(ifi); err != nil {
-		// error handling
+func padKey(key string, size int) string {
+	k := key
+	for l := 0; l < (size - len(key)); l++ {
+		k += "\x00"
 	}
-	p.SetMulticastTTL(2)
-	if _, err := p.WriteTo(data, nil, dst); err != nil {
-		// error handling
-	}
+	return k
 }

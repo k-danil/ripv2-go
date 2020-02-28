@@ -5,7 +5,6 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"net"
 	"time"
 )
@@ -76,7 +75,7 @@ func readPacket(content []byte, ifName string, src net.IP) (*packet, error) {
 		content: content,
 	}
 
-	fmt.Printf("%v \n", content)
+	// fmt.Printf("%v \n", content)
 
 	p.parser()
 
@@ -145,8 +144,6 @@ func (p *packet) pduValidator(conf *config) (*pdu, error) {
 		return nil, errors.New("Incorrect RIP version (use 2)")
 	}
 
-	//TODO cache call to netlink
-
 	switch p.pdu.auth {
 	case true:
 		if conf.Interfaces[p.ifn].Auth {
@@ -204,10 +201,7 @@ func (p *packet) authPlain(pass string) error {
 }
 
 func (p *packet) authHash(pass string) error {
-	pa := pass
-	for l := 0; l < (len(p.pdu.authKeyEntry) - len(pass)); l++ {
-		pa += "\x00"
-	}
+	pa := padKey(pass, len(p.pdu.authKeyEntry))
 
 	offset := p.pdu.authEntry.packLng + 4
 	tcont := make([]byte, 0)
