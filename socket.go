@@ -21,6 +21,9 @@ func socketOpen(c *config) (*socket, error) {
 
 	p := ipv4.NewPacketConn(s)
 
+	p.SetTOS(0xc0)
+	p.SetMulticastTTL(1)
+
 	if err := p.SetControlMessage(ipv4.FlagDst, true); err != nil {
 		return nil, err
 	}
@@ -73,14 +76,24 @@ func (s *socket) close() error {
 func (s *socket) sendMcast(data []byte, ifn string) error {
 	s.mux.Lock()
 	defer s.mux.Unlock()
+
 	dst := &net.UDPAddr{IP: net.IPv4(224, 0, 0, 9), Port: 520}
-	s.connect.SetTOS(0xc0)
 
 	ifi, _ := net.InterfaceByName(ifn)
 	if err := s.connect.SetMulticastInterface(ifi); err != nil {
 		return err
 	}
-	s.connect.SetMulticastTTL(1)
+	if _, err := s.connect.WriteTo(data, nil, dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *socket) sendUcast(data []byte, ip net.IP) error {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	dst := &net.UDPAddr{IP: ip, Port: 520}
 	if _, err := s.connect.WriteTo(data, nil, dst); err != nil {
 		return err
 	}

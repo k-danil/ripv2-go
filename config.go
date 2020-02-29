@@ -11,6 +11,11 @@ const (
 type config struct {
 	Interfaces map[string]ifc
 	Timers     timers
+	Local      local
+}
+
+type local struct {
+	Metric int
 }
 
 type timers struct {

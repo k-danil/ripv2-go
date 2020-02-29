@@ -6,7 +6,7 @@ TODO:
 * Check received packet srcIP ++
 * Add/Remove route to local table ++
 * Check local address using subscriptions
-* Unicast response
+* Unicast response ++
 * Check pdu route entry validity ++
 * Add debug logging support
 * Optimize pdu struct ++
@@ -14,3 +14,4 @@ TODO:
 * Support startup flags
 * Limit route entry count for outgoing pdu +-
 * Clean up changed status for adj and adj table not included in updates ++
+* Fix defered func in main ++

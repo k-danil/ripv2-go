@@ -1,3 +1,6 @@
+[local]
+metric = 120
+
 [timers]
 updateTimer = 30
 timeoutTimer = 180

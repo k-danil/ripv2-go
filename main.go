@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 type system struct {
@@ -11,30 +15,33 @@ type system struct {
 }
 
 func main() {
-	clearLocalTable()
+	sys := &system{}
+	var err error
+
+	term := make(chan os.Signal)
+	signal.Notify(term, os.Interrupt, syscall.SIGTERM)
 	// defer profile.Start(profile.TraceProfile).Stop()
-	conf, err := readConfig()
-	if err != nil {
+
+	if sys.config, err = readConfig(); err != nil {
 		log.Fatal(err)
 	}
 
-	sys := &system{config: conf}
-
-	//Listen for multicast on interfaces
-	s, err := socketOpen(sys.config)
-	if err != nil {
+	if sys.socket, err = socketOpen(sys.config); err != nil {
 		log.Fatal(err)
 	}
-
-	sys.socket = s
 
 	a := initTable(sys)
 
-	sys.socket.joinMcast()
-	defer sys.socket.close()
-	defer clearLocalTable()
+	go func() {
+		<-term
+		fmt.Println("\nClosing...")
+		clearLocalTable()
+		sys.socket.close()
+		os.Exit(0)
+	}()
 
-	//Receive packet in buffer
+	sys.socket.joinMcast()
+
 	for {
 		b := make([]byte, 514) //Maximum size of RIP pdu - 504byte
 		s, cm, _, err := sys.socket.connect.ReadFrom(b)

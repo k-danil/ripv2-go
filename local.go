@@ -89,7 +89,6 @@ func removeLocalRoute(network, mask uint32) error {
 	route := netlink.Route{
 		Dst:      dst,
 		Protocol: 10,
-		Priority: 31,
 	}
 
 	if err := netlink.RouteDel(&route); err != nil {

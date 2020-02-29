@@ -76,9 +76,9 @@ func (a *adjTable) scheduler() {
 				}
 			}
 
-			for _, ent := range a.entry {
-				fmt.Printf("%+v\n", ent)
-			}
+			// for _, ent := range a.entry {
+			// 	fmt.Printf("%+v\n", ent)
+			// }
 
 		case <-tWorker.C:
 			if a.change {
@@ -137,7 +137,7 @@ func (a *adjTable) requestProcess(p *pdu) {
 			pEnt.metric = a.entry[netid].metric
 		}
 	}
-	// p.pduToPacket()
+	a.system.socket.sendUcast(p.pduToByte(a.system.config), uintToIP(p.serviceFields.ip))
 }
 
 func (a *adjTable) responseProcess(p *pdu) {
@@ -166,7 +166,7 @@ func (a *adjTable) responseProcess(p *pdu) {
 					timestamp: p.serviceFields.timestamp,
 					change:    true,
 				}
-				go addLocalRoute(pEnt.network, pEnt.mask, srcIP)
+				addLocalRoute(pEnt.network, pEnt.mask, srcIP)
 				a.change = true
 			}
 		} else {
@@ -198,6 +198,8 @@ func (a *adjTable) responseProcess(p *pdu) {
 						a.entry[netid].metric = metric + 1
 						a.entry[netid].change = true
 						a.entry[netid].kill = false
+
+						replaceLocalRoute(pEnt.network, pEnt.mask, srcIP)
 						a.change = true
 					}
 				case metric < a.entry[netid].metric:
@@ -207,12 +209,13 @@ func (a *adjTable) responseProcess(p *pdu) {
 					a.entry[netid].metric = metric + 1
 					a.entry[netid].change = true
 					a.entry[netid].kill = false
+
+					replaceLocalRoute(pEnt.network, pEnt.mask, srcIP)
 					a.change = true
 				}
 			}
 		}
 	}
-	return
 }
 
 func (a *adjTable) pduPerIf(selector uint8) {
