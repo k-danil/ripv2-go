@@ -14,17 +14,19 @@ const (
 
 const (
 	infMetric uint32 = 16
+	invMetric uint32 = 255
 )
 
 const (
-	regular uint8 = 1
-	changed uint8 = 2
+	regular  uint8 = 1
+	changed  uint8 = 2
+	gettable uint8 = 3
 )
 
 type adjTable struct {
 	entry  map[uint64]*adj
 	mux    sync.Mutex
-	socket *socket
+	system *system
 	change bool
 }
 
@@ -46,37 +48,44 @@ func (a *adj) String() string {
 	)
 }
 
-func initTable(c *config, s *socket) *adjTable {
-	a := &adjTable{socket: s}
+func initTable(sys *system) *adjTable {
+	a := &adjTable{system: sys}
 	a.entry = make(map[uint64]*adj)
-	go a.scheduler(c)
+	go a.scheduler()
 
-	//TODO Move to subscriptions
-	for i := range c.Interfaces {
-		l, err := getLocalTable(i)
-		if err != nil {
-			log.Println(err)
-		} else {
-			a.adjProcess(l)
-		}
-	}
+	go a.pduPerIf(gettable)
 
 	return a
 }
 
-func (a *adjTable) scheduler(c *config) {
+func (a *adjTable) scheduler() {
 	tWorker := time.NewTicker(5 * time.Second)
-	tKeepAlive := time.NewTicker(time.Duration(c.Timers.UpdateTimer) * time.Second)
+	tKeepAlive := time.NewTicker(time.Duration(a.system.config.Timers.UpdateTimer) * time.Second)
 	for {
 		select {
 		case <-tKeepAlive.C:
-			go a.pduPerIf(regular, c)
+			go a.pduPerIf(regular)
+
+			//TODO Move to subscriptions
+			for i := range a.system.config.Interfaces {
+				l, err := getLocalTable(i)
+				if err != nil {
+					log.Println(err)
+				} else {
+					a.adjProcess(l)
+				}
+			}
+
+			for _, ent := range a.entry {
+				fmt.Printf("%+v\n", ent)
+			}
 
 		case <-tWorker.C:
 			if a.change {
-				go a.pduPerIf(changed, c)
+				go a.pduPerIf(changed)
 			}
-			a.adjClear(c)
+
+			a.clear()
 		}
 	}
 }
@@ -90,17 +99,18 @@ func (a *adjTable) adjProcess(p *pdu) {
 	}
 }
 
-func (a *adjTable) adjClear(c *config) {
+func (a *adjTable) clear() {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 	ctime := time.Now().Unix()
 	for key, val := range a.entry {
 		switch timer := ctime - val.timestamp; {
-		case timer > (c.Timers.GarbageTimer + c.Timers.TimeoutTimer):
+		case timer > (a.system.config.Timers.GarbageTimer + a.system.config.Timers.TimeoutTimer):
 			if val.kill {
+				go removeLocalRoute(val.ip, val.mask)
 				delete(a.entry, key)
 			}
-		case timer > c.Timers.TimeoutTimer:
+		case timer > a.system.config.Timers.TimeoutTimer:
 			if !val.kill {
 				val.metric = infMetric
 				val.change = true
@@ -112,12 +122,10 @@ func (a *adjTable) adjClear(c *config) {
 }
 
 func (a *adjTable) requestProcess(p *pdu) {
-	a.mux.Lock()
-	defer a.mux.Unlock()
 	if p.routeEntries[0].metric == infMetric && p.routeEntries[0].network == 0 {
-		p := a.adjToPdu(1, p.serviceFields.srcIf)
-		if p != nil {
-			a.socket.socketSendMcast(p.pduToByte(a.socket.config, p.serviceFields.srcIf), p.serviceFields.srcIf)
+		pds := a.adjToPdu(regular, p.serviceFields.ifn)
+		for _, pdu := range pds {
+			a.system.socket.sendMcast(pdu.pduToByte(a.system.config), pdu.serviceFields.ifn)
 		}
 		return
 	}
@@ -135,7 +143,7 @@ func (a *adjTable) requestProcess(p *pdu) {
 func (a *adjTable) responseProcess(p *pdu) {
 	a.mux.Lock()
 	defer a.mux.Unlock()
-	ctime := time.Now().Unix()
+
 	for _, pEnt := range p.routeEntries {
 		//Calculate id to map
 		netid := ipmask(pEnt.network, pEnt.mask)
@@ -144,7 +152,7 @@ func (a *adjTable) responseProcess(p *pdu) {
 		if pEnt.nextHop != 0 {
 			srcIP = pEnt.nextHop
 		} else {
-			srcIP = p.serviceFields.srcIP
+			srcIP = p.serviceFields.ip
 		}
 
 		if a.entry[netid] == nil {
@@ -153,11 +161,12 @@ func (a *adjTable) responseProcess(p *pdu) {
 					ip:        pEnt.network,
 					mask:      pEnt.mask,
 					nextHop:   srcIP,
-					ifn:       p.serviceFields.srcIf,
+					ifn:       p.serviceFields.ifn,
 					metric:    pEnt.metric + 1,
-					timestamp: ctime,
+					timestamp: p.serviceFields.timestamp,
 					change:    true,
 				}
+				go addLocalRoute(pEnt.network, pEnt.mask, srcIP)
 				a.change = true
 			}
 		} else {
@@ -171,21 +180,21 @@ func (a *adjTable) responseProcess(p *pdu) {
 						a.change = true
 					}
 				case metric < a.entry[netid].metric:
-					a.entry[netid].timestamp = ctime
+					a.entry[netid].timestamp = p.serviceFields.timestamp
 					a.entry[netid].metric = metric
 					a.entry[netid].change = true
 					a.entry[netid].kill = false
 					a.change = true
 				case metric == a.entry[netid].metric:
-					a.entry[netid].timestamp = ctime
+					a.entry[netid].timestamp = p.serviceFields.timestamp
 				}
 			} else {
 				switch metric := pEnt.metric + 1; {
 				case metric == a.entry[netid].metric:
 					if a.entry[netid].kill == true {
 						a.entry[netid].nextHop = srcIP
-						a.entry[netid].ifn = p.serviceFields.srcIf
-						a.entry[netid].timestamp = ctime
+						a.entry[netid].ifn = p.serviceFields.ifn
+						a.entry[netid].timestamp = p.serviceFields.timestamp
 						a.entry[netid].metric = metric + 1
 						a.entry[netid].change = true
 						a.entry[netid].kill = false
@@ -193,8 +202,8 @@ func (a *adjTable) responseProcess(p *pdu) {
 					}
 				case metric < a.entry[netid].metric:
 					a.entry[netid].nextHop = srcIP
-					a.entry[netid].ifn = p.serviceFields.srcIf
-					a.entry[netid].timestamp = ctime
+					a.entry[netid].ifn = p.serviceFields.ifn
+					a.entry[netid].timestamp = p.serviceFields.timestamp
 					a.entry[netid].metric = metric + 1
 					a.entry[netid].change = true
 					a.entry[netid].kill = false
@@ -203,38 +212,46 @@ func (a *adjTable) responseProcess(p *pdu) {
 			}
 		}
 	}
+	return
 }
 
-func (a *adjTable) pduPerIf(selector uint8, c *config) {
-	for ifn, ifp := range c.Interfaces {
+func (a *adjTable) pduPerIf(selector uint8) {
+	for ifn, ifp := range a.system.config.Interfaces {
 		if ifp.Passive {
 			//Not send update to passive interface
 			continue
 		}
 
-		//TODO Limit route entry per pdu
-
-		p := a.adjToPdu(selector, ifn)
-		if p != nil {
-			a.socket.socketSendMcast(p.pduToByte(c, ifn), ifn)
+		pds := a.adjToPdu(selector, ifn)
+		for _, pdu := range pds {
+			a.system.socket.sendMcast(pdu.pduToByte(a.system.config), pdu.serviceFields.ifn)
 		}
 
-		//Very bad idea. Place this in separate func
 		if selector == changed {
-			for _, adj := range a.entry {
-				adj.change = false
-			}
-			a.change = false
+			a.cleanChangeFlag()
 		}
 	}
 }
 
-func (a *adjTable) adjToPdu(selector uint8, ifn string) *pdu {
+func (a *adjTable) cleanChangeFlag() {
+	a.mux.Lock()
+	defer a.mux.Unlock()
+	for _, adj := range a.entry {
+		adj.change = false
+	}
+	a.change = false
+}
+
+func (a *adjTable) adjToPdu(selector uint8, ifn string) []*pdu {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 
+	//TODO Limit route entry per pdu
+	pds := make([]*pdu, 0)
+
 	pdu := &pdu{
-		header: header{command: 2, version: 2},
+		header:        header{command: 2, version: 2},
+		serviceFields: serviceFields{ifn: ifn},
 	}
 
 	switch selector {
@@ -253,7 +270,6 @@ func (a *adjTable) adjToPdu(selector uint8, ifn string) *pdu {
 				routeTag: 0,
 			}
 			pdu.routeEntries = append(pdu.routeEntries, routeEntry)
-
 		}
 	case changed:
 		for _, adj := range a.entry {
@@ -274,14 +290,17 @@ func (a *adjTable) adjToPdu(selector uint8, ifn string) *pdu {
 				pdu.routeEntries = append(pdu.routeEntries, routeEntry)
 			}
 		}
+	case gettable:
+		pdu.header.command = request
+		pdu.routeEntries = []routeEntry{{metric: 16}}
 	}
 
 	if len(pdu.routeEntries) > 0 {
 		//Pointless to return zero sized pdu
-		return pdu
+		pds := append(pds, pdu)
+		return pds
 	}
-	return nil
-
+	return pds
 }
 
 func ipmask(ip, mask uint32) uint64 {

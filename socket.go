@@ -33,7 +33,7 @@ func socketOpen(c *config) (*socket, error) {
 	return socket, nil
 }
 
-func (s *socket) socketJoinMcast() error {
+func (s *socket) joinMcast() error {
 	group := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
 
 	for ifc := range s.config.Interfaces {
@@ -48,7 +48,7 @@ func (s *socket) socketJoinMcast() error {
 	return nil
 }
 
-func (s *socket) socketLeaveMcast() error {
+func (s *socket) leaveMcast() error {
 	group := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
 
 	for ifc := range s.config.Interfaces {
@@ -61,8 +61,8 @@ func (s *socket) socketLeaveMcast() error {
 	return nil
 }
 
-func (s *socket) socketClose() error {
-	if err := s.socketLeaveMcast(); err != nil {
+func (s *socket) close() error {
+	if err := s.leaveMcast(); err != nil {
 		return err
 	}
 	s.connect.Close()
@@ -70,7 +70,7 @@ func (s *socket) socketClose() error {
 	return nil
 }
 
-func (s *socket) socketSendMcast(data []byte, ifn string) error {
+func (s *socket) sendMcast(data []byte, ifn string) error {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	dst := &net.UDPAddr{IP: net.IPv4(224, 0, 0, 9), Port: 520}

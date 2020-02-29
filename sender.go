@@ -12,24 +12,14 @@ type keyAuth struct {
 	authType uint16
 }
 
-type hashAuth struct {
-	afi      uint16
-	authType uint16
-	packLng  uint16
-	keyID    uint8
-	authLng  uint8
-	sqn      uint32
-	blank0   uint64
-}
-
-func (pdu *pdu) pduToByte(c *config, ifn string) []byte {
+func (pdu *pdu) pduToByte(c *config) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, pdu.header)
 
-	if c.Interfaces[ifn].Auth {
-		switch c.Interfaces[ifn].KeyChain.AuthType {
+	if c.Interfaces[pdu.serviceFields.ifn].Auth {
+		switch c.Interfaces[pdu.serviceFields.ifn].KeyChain.AuthType {
 		case authPlain:
-			pass := padKey(c.Interfaces[ifn].KeyChain.AuthKey, 16)
+			pass := padKey(c.Interfaces[pdu.serviceFields.ifn].KeyChain.AuthKey, 16)
 			plain := keyAuth{
 				afi:      afiAuth,
 				authType: authPlain,
@@ -38,7 +28,7 @@ func (pdu *pdu) pduToByte(c *config, ifn string) []byte {
 			binary.Write(buf, binary.BigEndian, []byte(pass))
 		case authHash:
 			ctime := time.Now().Unix()
-			hash := hashAuth{
+			hash := authHashEntry{
 				afi:      afiAuth,
 				authType: authHash,
 				packLng:  uint16(24 + (len(pdu.routeEntries) * 20)),
@@ -54,8 +44,8 @@ func (pdu *pdu) pduToByte(c *config, ifn string) []byte {
 		binary.Write(buf, binary.BigEndian, rEnt)
 	}
 
-	if c.Interfaces[ifn].Auth && c.Interfaces[ifn].KeyChain.AuthType == authHash {
-		pass := padKey(c.Interfaces[ifn].KeyChain.AuthKey, 16)
+	if c.Interfaces[pdu.serviceFields.ifn].Auth && c.Interfaces[pdu.serviceFields.ifn].KeyChain.AuthType == authHash {
+		pass := padKey(c.Interfaces[pdu.serviceFields.ifn].KeyChain.AuthKey, 16)
 		key := keyAuth{
 			afi:      afiAuth,
 			authType: authKey,
