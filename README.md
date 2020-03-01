@@ -10,8 +10,10 @@ TODO:
 * Check pdu route entry validity ++
 * Add debug logging support
 * Optimize pdu struct ++
-* Support for config reinit
+* Support for config reinit ++
 * Support startup flags
 * Limit route entry count for outgoing pdu +-
 * Clean up changed status for adj and adj table not included in updates ++
 * Fix defered func in main ++
+* Local metric configuration +-
+* Test suit

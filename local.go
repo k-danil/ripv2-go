@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"log"
 	"net"
+	"time"
 
 	"github.com/vishvananda/netlink"
 )
@@ -26,8 +27,9 @@ func getLocalTable(ifc string) (*pdu, error) {
 			command: 2,
 		},
 		serviceFields: serviceFields{
-			ip:  binary.BigEndian.Uint32([]byte{127, 0, 0, 1}),
-			ifn: link.Attrs().Name,
+			ip:        binary.BigEndian.Uint32([]byte{127, 0, 0, 1}),
+			ifn:       link.Attrs().Name,
+			timestamp: time.Now().Unix(),
 		},
 	}
 	for i := 0; i < len(iplist); i++ {

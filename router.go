@@ -43,7 +43,7 @@ type adj struct {
 
 func (a *adj) String() string {
 	return fmt.Sprintf(
-		"{ip:%v mask:%v nextHop:%v ifi:%v metric:%v timestamp:%v kill:%v change:%v}",
+		"ip:%v mask:%v nextHop:%v ifi:%v metric:%v timestamp:%v kill:%v change:%v",
 		uintToIP(a.ip), uintToIP(a.mask), uintToIP(a.nextHop), a.ifn, a.metric, a.timestamp, a.kill, a.change,
 	)
 }
@@ -59,6 +59,7 @@ func initTable(sys *system) *adjTable {
 }
 
 func (a *adjTable) scheduler() {
+	log.Println("Starting scheduler...")
 	tWorker := time.NewTicker(5 * time.Second)
 	tKeepAlive := time.NewTicker(time.Duration(a.system.config.Timers.UpdateTimer) * time.Second)
 	for {
@@ -75,17 +76,23 @@ func (a *adjTable) scheduler() {
 					a.adjProcess(l)
 				}
 			}
-
-			// for _, ent := range a.entry {
-			// 	fmt.Printf("%+v\n", ent)
-			// }
-
 		case <-tWorker.C:
 			if a.change {
 				go a.pduPerIf(changed)
 			}
 
 			a.clear()
+		case <-a.system.signal.getAdj:
+			for _, ent := range a.entry {
+				log.Printf("%+v\n", ent)
+			}
+		case <-a.system.signal.stopSched:
+			log.Println("Stoping scheduler...")
+			return
+		case <-a.system.signal.resetSched:
+			log.Println("Stoping scheduler...")
+			go a.scheduler()
+			return
 		}
 	}
 }

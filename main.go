@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -12,15 +11,23 @@ import (
 type system struct {
 	config *config
 	socket *socket
+	signal *sign
+}
+
+type sign struct {
+	resetSched  chan bool
+	stopSched   chan bool
+	stopReceive chan bool
+	stopMain    chan bool
+	getAdj      chan bool
 }
 
 func main() {
+	log.Println("Starting main...")
 	sys := &system{}
 	var err error
 
-	term := make(chan os.Signal)
-	signal.Notify(term, os.Interrupt, syscall.SIGTERM)
-	// defer profile.Start(profile.TraceProfile).Stop()
+	sys.signal = signalProcess(sys)
 
 	if sys.config, err = readConfig(); err != nil {
 		log.Fatal(err)
@@ -32,41 +39,77 @@ func main() {
 
 	a := initTable(sys)
 
+	sys.socket.joinMcast()
+
 	go func() {
-		<-term
-		fmt.Println("\nClosing...")
+		<-sys.signal.stopMain
+		log.Println("Closing main...")
 		clearLocalTable()
 		sys.socket.close()
 		os.Exit(0)
 	}()
 
-	sys.socket.joinMcast()
-
+Loop:
 	for {
-		b := make([]byte, 514) //Maximum size of RIP pdu - 504byte
-		s, cm, _, err := sys.socket.connect.ReadFrom(b)
-		if err != nil {
-			log.Fatal(err)
+		select {
+		case <-sys.signal.stopReceive:
+			break Loop
+		default:
+			b := make([]byte, 514) //Maximum size of RIP pdu - 504byte
+			s, cm, _, err := sys.socket.connect.ReadFrom(b)
+			if err != nil {
+				log.Fatal(err)
+			}
+			ifc, err := net.InterfaceByIndex(cm.IfIndex)
+
+			go func() {
+				packet, err := readPacket(b[:s], ifc.Name, cm.Src)
+				if err != nil {
+					//Drop weird sourced packet
+					return
+				}
+
+				pdu := packet.parse()
+				err = pdu.validate(sys.config, packet.content)
+				if err != nil {
+					log.Println(err)
+				} else {
+					a.adjProcess(pdu)
+				}
+			}()
 		}
-		ifc, err := net.InterfaceByIndex(cm.IfIndex)
-
-		//Process received packet
-		go func() {
-			//Fill service fields and payload to struct
-			packet, err := readPacket(b[:s], ifc.Name, cm.Src)
-			if err != nil {
-				//Drop weird sourced packet
-				return
-			}
-
-			pdu := packet.parse()
-			//Validate over RFC guidline and authenticate with pass
-			err = pdu.validate(sys.config, packet.content)
-			if err != nil {
-				log.Println(err)
-			} else {
-				a.adjProcess(pdu)
-			}
-		}()
 	}
+}
+
+func signalProcess(sys *system) *sign {
+	signChan := make(chan os.Signal)
+	signal.Notify(signChan)
+
+	sign := &sign{}
+	sign.getAdj = make(chan bool)
+	sign.resetSched = make(chan bool)
+	sign.stopMain = make(chan bool)
+	sign.stopReceive = make(chan bool)
+	sign.stopSched = make(chan bool)
+
+	go func() {
+		for s := range signChan {
+			switch s {
+			case syscall.SIGHUP:
+				sys.config, _ = readConfig()
+				sys.socket.leaveMcast()
+				sys.socket.joinMcast()
+				sign.resetSched <- true
+			case os.Interrupt:
+				sign.stopSched <- true
+				sign.stopReceive <- true
+				sign.stopMain <- true
+				return
+			case syscall.SIGUSR1:
+				sign.getAdj <- true
+			}
+		}
+	}()
+
+	return sign
 }
