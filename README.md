@@ -1,12 +1,15 @@
 # ripv2-go
-Simple ripv2 daemon for linux
+Simple ripv2 deaemon implimented again RFC2453, RFC4822.
 
-Deaemon implimented again RFC2453, RFC4822.
 ---
 Incoming signals:
+
 SIGHUP - reinit config
+
 SIGUSR1 - print adj table to log
+
 SIGTERM - gracefull stop
+
 ---
 Basic config in toml:
 <pre><code>
@@ -29,6 +32,7 @@ garbageTimer = 120
 </code> </pre>
 
 **metric** - metric in linux local table
+
 **authType** - "2" Plain "3" md5
 
 ---
