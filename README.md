@@ -1,19 +1,41 @@
 # ripv2-go
 Simple ripv2 daemon for linux
 
+Deaemon implimented again RFC2453, RFC4822.
+---
+Incoming signals:
+SIGHUP - reinit config
+SIGUSR1 - print adj table to log
+SIGTERM - gracefull stop
+---
+Basic config in toml:
+<pre><code>
+[local]
+metric = 120
+
+[timers]
+updateTimer = 30
+timeoutTimer = 180
+garbageTimer = 120
+
+[interfaces]
+ [interfaces.br0]
+ auth = true
+   [interfaces.br0.keychain]
+   authType = 3
+   authKey = "123"
+ [interfaces.lo]
+ passive = true
+</code> </pre>
+
+**metric** - metric in linux local table
+**authType** - "2" Plain "3" md5
+
+---
 TODO:
-* Initial full table request ++
-* Check received packet srcIP ++
-* Add/Remove route to local table ++
 * Check local address using subscriptions
-* Unicast response ++
-* Check pdu route entry validity ++
 * Add debug logging support
-* Optimize pdu struct ++
-* Support for config reinit ++
 * Support startup flags
 * Limit route entry count for outgoing pdu +-
-* Clean up changed status for adj and adj table not included in updates ++
-* Fix defered func in main ++
 * Local metric configuration +-
 * Test suit
