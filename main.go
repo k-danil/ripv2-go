@@ -18,7 +18,6 @@ type sign struct {
 	resetSched  chan bool
 	stopSched   chan bool
 	stopReceive chan bool
-	stopMain    chan bool
 	getAdj      chan bool
 }
 
@@ -41,13 +40,9 @@ func main() {
 
 	sys.socket.joinMcast()
 
-	go func() {
-		<-sys.signal.stopMain
-		log.Println("Closing main...")
-		clearLocalTable()
-		sys.socket.close()
-		os.Exit(0)
-	}()
+	defer clearLocalTable()
+	defer sys.socket.close()
+	defer log.Println("Closing main...")
 
 Loop:
 	for {
@@ -82,13 +77,13 @@ Loop:
 }
 
 func signalProcess(sys *system) *sign {
+	var err error
 	signChan := make(chan os.Signal)
 	signal.Notify(signChan)
 
 	sign := &sign{}
 	sign.getAdj = make(chan bool)
 	sign.resetSched = make(chan bool)
-	sign.stopMain = make(chan bool)
 	sign.stopReceive = make(chan bool)
 	sign.stopSched = make(chan bool)
 
@@ -96,14 +91,19 @@ func signalProcess(sys *system) *sign {
 		for s := range signChan {
 			switch s {
 			case syscall.SIGHUP:
-				sys.config, _ = readConfig()
-				sys.socket.leaveMcast()
-				sys.socket.joinMcast()
+				if sys.config, err = readConfig(); err != nil {
+					log.Fatal(err)
+				}
+				if sys.socket.leaveMcast() != nil {
+					log.Println()
+				}
+				if sys.socket.joinMcast() != nil {
+					log.Println()
+				}
 				sign.resetSched <- true
 			case os.Interrupt:
 				sign.stopSched <- true
 				sign.stopReceive <- true
-				sign.stopMain <- true
 				return
 			case syscall.SIGUSR1:
 				sign.getAdj <- true
