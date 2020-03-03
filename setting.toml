@@ -1,5 +1,6 @@
 [local]
 metric = 120
+log = 1
 
 [timers]
 updateTimer = 30

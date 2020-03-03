@@ -16,6 +16,7 @@ type config struct {
 
 type local struct {
 	Metric int
+	Log    uint8
 }
 
 type timers struct {

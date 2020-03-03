@@ -12,6 +12,8 @@ type system struct {
 	config *config
 	socket *socket
 	signal *sign
+	logger logger
+	debug  bool
 }
 
 type sign struct {
@@ -21,28 +23,39 @@ type sign struct {
 	getAdj      chan bool
 }
 
+func init() {
+
+}
+
 func main() {
-	log.Println("Starting main...")
 	sys := &system{}
 	var err error
 
+	sys.logger = logProcess(sys)
 	sys.signal = signalProcess(sys)
 
+	sys.logger.send(info, "starting main")
+
 	if sys.config, err = readConfig(); err != nil {
-		log.Fatal(err)
+		sys.logger.send(fatal, err)
+	}
+	if sys.config.Local.Log == 5 {
+		sys.debug = true
 	}
 
 	if sys.socket, err = socketOpen(sys.config); err != nil {
-		log.Fatal(err)
+		sys.logger.send(fatal, err)
 	}
 
 	a := initTable(sys)
 
-	sys.socket.joinMcast()
+	if err = sys.socket.joinMcast(); err != nil {
+		sys.logger.send(erro, err)
+	}
 
 	defer clearLocalTable()
 	defer sys.socket.close()
-	defer log.Println("Closing main...")
+	defer sys.logger.send(info, "closing main")
 
 Loop:
 	for {
@@ -53,9 +66,12 @@ Loop:
 			b := make([]byte, 514) //Maximum size of RIP pdu - 504byte
 			s, cm, _, err := sys.socket.connect.ReadFrom(b)
 			if err != nil {
-				log.Fatal(err)
+				sys.logger.send(fatal, err)
 			}
 			ifc, err := net.InterfaceByIndex(cm.IfIndex)
+			if err != nil {
+				sys.logger.send(erro, err)
+			}
 
 			go func() {
 				packet, err := readPacket(b[:s], ifc.Name, cm.Src)
@@ -65,9 +81,12 @@ Loop:
 				}
 
 				pdu := packet.parse()
+				if sys.debug {
+					sys.logger.send(debug, pdu)
+				}
 				err = pdu.validate(sys.config, packet.content)
 				if err != nil {
-					log.Println(err)
+					sys.logger.send(warn, err)
 				} else {
 					a.adjProcess(pdu)
 				}

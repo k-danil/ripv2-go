@@ -59,7 +59,7 @@ func initTable(sys *system) *adjTable {
 }
 
 func (a *adjTable) scheduler() {
-	log.Println("Starting scheduler...")
+	a.system.logger.send(info, "starting scheduler")
 	tWorker := time.NewTicker(5 * time.Second)
 	tKeepAlive := time.NewTicker(time.Duration(a.system.config.Timers.UpdateTimer) * time.Second)
 	for {
@@ -87,10 +87,10 @@ func (a *adjTable) scheduler() {
 				log.Printf("%+v\n", ent)
 			}
 		case <-a.system.signal.stopSched:
-			log.Println("Stoping scheduler...")
+			defer a.system.logger.send(info, "stoping scheduler")
 			return
 		case <-a.system.signal.resetSched:
-			log.Println("Stoping scheduler...")
+			defer a.system.logger.send(info, "stoping scheduler")
 			go a.scheduler()
 			return
 		}
