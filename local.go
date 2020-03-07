@@ -61,7 +61,7 @@ func addLocalRoute(network, mask, nextHop uint32) error {
 	route := netlink.Route{
 		Dst:      dst,
 		Protocol: 10,
-		Priority: 31,
+		Priority: sys.config.Local.Metric,
 		Gw:       uintToIP(nextHop),
 	}
 	if err := netlink.RouteAdd(&route); err != nil {

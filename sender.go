@@ -7,46 +7,41 @@ import (
 	"time"
 )
 
-type keyAuth struct {
-	afi      uint16
-	authType uint16
-}
+func (pdu *pdu) pduToByte() []byte {
+	if sys.config.Local.Log == 5 {
+		sys.logger.send(debug, pdu)
+	}
 
-func (pdu *pdu) pduToByte(c *config) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, pdu.header)
+	ifn := pdu.serviceFields.ifn
 
-	if c.Interfaces[pdu.serviceFields.ifn].Auth {
-		switch c.Interfaces[pdu.serviceFields.ifn].KeyChain.AuthType {
-		case authPlain:
-			pass := padKey(c.Interfaces[pdu.serviceFields.ifn].KeyChain.AuthKey, 16)
-			plain := keyAuth{
-				afi:      afiAuth,
-				authType: authPlain,
-			}
-			binary.Write(buf, binary.BigEndian, plain)
-			binary.Write(buf, binary.BigEndian, []byte(pass))
-		case authHash:
-			ctime := time.Now().Unix()
-			hash := authHashEntry{
-				afi:      afiAuth,
-				authType: authHash,
-				packLng:  uint16(24 + (len(pdu.routeEntries) * 20)),
-				keyID:    1,
-				authLng:  16,
-				sqn:      uint32(ctime),
-			}
-			binary.Write(buf, binary.BigEndian, hash)
+	switch sys.config.Interfaces[ifn].KeyChain.AuthType {
+	case authPlain:
+		pass := padKey(sys.config.Interfaces[ifn].KeyChain.AuthKey, 16)
+		plain := authKeyEntry{
+			afi:      afiAuth,
+			authType: authPlain,
 		}
+		binary.Write(buf, binary.BigEndian, plain)
+		binary.Write(buf, binary.BigEndian, []byte(pass))
+	case authHash:
+		hash := authHashEntry{
+			afi:      afiAuth,
+			authType: authHash,
+			packLng:  uint16(24 + (len(pdu.routeEntries) * 20)),
+			keyID:    1,
+			authLng:  16,
+			sqn:      uint32(time.Now().Unix()),
+		}
+		binary.Write(buf, binary.BigEndian, hash)
 	}
 
-	for _, rEnt := range pdu.routeEntries {
-		binary.Write(buf, binary.BigEndian, rEnt)
-	}
+	binary.Write(buf, binary.BigEndian, pdu.routeEntries)
 
-	if c.Interfaces[pdu.serviceFields.ifn].Auth && c.Interfaces[pdu.serviceFields.ifn].KeyChain.AuthType == authHash {
-		pass := padKey(c.Interfaces[pdu.serviceFields.ifn].KeyChain.AuthKey, 16)
-		key := keyAuth{
+	if sys.config.Interfaces[ifn].KeyChain.AuthType == authHash {
+		pass := padKey(sys.config.Interfaces[ifn].KeyChain.AuthKey, 16)
+		key := authKeyEntry{
 			afi:      afiAuth,
 			authType: authKey,
 		}

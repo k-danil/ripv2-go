@@ -15,6 +15,8 @@ Basic config in toml:
 <pre><code>
 [local]
 metric = 120
+msgSize = 25
+log = 4
 
 [timers]
 updateTimer = 30
@@ -35,11 +37,10 @@ garbageTimer = 120
 
 **authType** - "2" Plain "3" md5
 
+**log** - log level 0 -> 5
+
 ---
 TODO:
-* Check local address using subscriptions
-* Add debug logging support
 * Support startup flags
-* Limit route entry count for outgoing pdu +-
 * Local metric configuration +-
 * Test suit

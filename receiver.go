@@ -5,12 +5,13 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"errors"
-	"log"
+	"fmt"
 	"net"
 	"time"
 )
 
 const (
+	authNon   uint16 = 0
 	authKey   uint16 = 1
 	authPlain uint16 = 2
 	authHash  uint16 = 3
@@ -32,9 +33,7 @@ type pdu struct {
 	serviceFields serviceFields
 	header        header
 	routeEntries  []routeEntry
-	auth          bool
-	authType      uint16
-	authEntry     authHashEntry
+	authHashEntry authHashEntry
 	authKeyEntry  []byte
 }
 
@@ -63,10 +62,16 @@ type authHashEntry struct {
 	blank0   uint64
 }
 
+type authKeyEntry struct {
+	afi      uint16
+	authType uint16
+}
+
 type serviceFields struct {
 	ip        uint32
 	ifn       string
 	timestamp int64
+	authType  uint16
 }
 
 func readPacket(content []byte, ifName string, src net.IP) (*packet, error) {
@@ -100,20 +105,19 @@ func (p *packet) parse() *pdu {
 	for i := 1; i <= (len(p.content) / 20); i++ {
 		offset := p.content[(i-1)*20+4 : i*20+4]
 		afi := binary.BigEndian.Uint16(offset[0:2])
-		if i == 1 {
-			pdu.authType = binary.BigEndian.Uint16(offset[2:4])
-		}
 		switch afi {
 		case afiAuth:
-			pdu.auth = true
 			authType := binary.BigEndian.Uint16(offset[2:4])
+			if i == 1 {
+				pdu.serviceFields.authType = authType
+			}
 			switch authType {
 			case authKey:
-				pdu.authKeyEntry = offset[4:pdu.authEntry.authLng]
+				pdu.authKeyEntry = offset[4:pdu.authHashEntry.authLng]
 			case authPlain:
 				pdu.authKeyEntry = bytes.TrimRight(offset[4:20], "\x00")
 			case authHash:
-				pdu.authEntry = authHashEntry{
+				pdu.authHashEntry = authHashEntry{
 					packLng: binary.BigEndian.Uint16(offset[4:6]),
 					keyID:   uint8(offset[6]),
 					authLng: uint8(offset[7]),
@@ -143,25 +147,27 @@ func (p *packet) parse() *pdu {
 	return pdu
 }
 
-func (p *pdu) validate(conf *config, content []byte) error {
+func (p *pdu) validate(content []byte) error {
 	if p.header.version != 2 {
 		return errors.New("Incorrect RIP version (use 2)")
 	}
 
-	if p.auth {
-		if conf.Interfaces[p.serviceFields.ifn].Auth {
-			if p.authType != conf.Interfaces[p.serviceFields.ifn].KeyChain.AuthType {
+	ifn := p.serviceFields.ifn
+
+	if p.serviceFields.authType > 0 {
+		if sys.config.Interfaces[ifn].KeyChain.AuthType > 0 {
+			if p.serviceFields.authType != sys.config.Interfaces[ifn].KeyChain.AuthType {
 				return errors.New("Incorrect AuthType")
 			}
 
-			switch p.authType {
+			switch p.serviceFields.authType {
 			case authPlain:
-				err := p.authPlain(conf.Interfaces[p.serviceFields.ifn].KeyChain.AuthKey)
+				err := p.authPlain(sys.config.Interfaces[ifn].KeyChain.AuthKey)
 				if err != nil {
 					return err
 				}
 			case authHash:
-				err := p.authHash(conf.Interfaces[p.serviceFields.ifn].KeyChain.AuthKey, content)
+				err := p.authHash(sys.config.Interfaces[ifn].KeyChain.AuthKey, content)
 				if err != nil {
 					return err
 				}
@@ -170,7 +176,7 @@ func (p *pdu) validate(conf *config, content []byte) error {
 			return errors.New("Authentication is not configured on interface")
 		}
 	} else {
-		if conf.Interfaces[p.serviceFields.ifn].Auth {
+		if sys.config.Interfaces[ifn].KeyChain.AuthType > 0 {
 			return errors.New("Expect authenticated packet on interface")
 		}
 	}
@@ -179,10 +185,10 @@ func (p *pdu) validate(conf *config, content []byte) error {
 		for l := 0; l < len(p.routeEntries); l++ {
 			if p.routeEntries[l].metric > infMetric {
 				p.routeEntries[l].metric = invMetric
-				log.Printf("Bad metric. Route entry %v marked invalid.", uintToIP(p.routeEntries[l].network))
+				sys.logger.send(warn, fmt.Sprintf("Bad metric. Route entry %v marked invalid.", uintToIP(p.routeEntries[l].network)))
 			} else if p.routeEntries[l].network != 0 && !net.IP(uintToIP(p.routeEntries[l].network)).IsGlobalUnicast() {
 				p.routeEntries[l].metric = invMetric
-				log.Printf("Bad address. Route entry %v marked invalid.", uintToIP(p.routeEntries[l].network))
+				sys.logger.send(warn, fmt.Sprintf("Bad address. Route entry %v marked invalid.", uintToIP(p.routeEntries[l].network)))
 			}
 		}
 	}
@@ -199,7 +205,7 @@ func (p *pdu) authPlain(pass string) error {
 func (p *pdu) authHash(pass string, content []byte) error {
 	pa := padKey(pass, len(p.authKeyEntry))
 
-	offset := p.authEntry.packLng + 4
+	offset := p.authHashEntry.packLng + 4
 	tcont := make([]byte, 0)
 	tcont = append(tcont, content[:offset]...)
 	tcont = append(tcont, pa...)

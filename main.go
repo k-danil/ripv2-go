@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"flag"
 	"net"
 	"os"
 	"os/signal"
@@ -9,11 +9,11 @@ import (
 )
 
 type system struct {
-	config *config
-	socket *socket
-	signal *sign
-	logger logger
-	debug  bool
+	config  *config
+	socket  *socket
+	signal  *sign
+	logger  logger
+	cfgPath string
 }
 
 type sign struct {
@@ -23,31 +23,34 @@ type sign struct {
 	getAdj      chan bool
 }
 
-func init() {
+var sys = system{}
 
+func init() {
+	const (
+		defaultCfgPath = "settings.toml"
+	)
+	flag.StringVar(&sys.cfgPath, "f", defaultCfgPath, "config file")
+	flag.Parse()
+
+	sys.logger = logProcess()
+	sys.signal = signalProcess()
 }
 
 func main() {
-	sys := &system{}
+	// defer profile.Start(profile.MemProfile).Stop()
 	var err error
-
-	sys.logger = logProcess(sys)
-	sys.signal = signalProcess(sys)
 
 	sys.logger.send(info, "starting main")
 
 	if sys.config, err = readConfig(); err != nil {
 		sys.logger.send(fatal, err)
 	}
-	if sys.config.Local.Log == 5 {
-		sys.debug = true
-	}
 
-	if sys.socket, err = socketOpen(sys.config); err != nil {
+	if sys.socket, err = socketOpen(); err != nil {
 		sys.logger.send(fatal, err)
 	}
 
-	a := initTable(sys)
+	a := initTable()
 
 	if err = sys.socket.joinMcast(); err != nil {
 		sys.logger.send(erro, err)
@@ -81,10 +84,10 @@ Loop:
 				}
 
 				pdu := packet.parse()
-				if sys.debug {
+				if sys.config.Local.Log == 5 {
 					sys.logger.send(debug, pdu)
 				}
-				err = pdu.validate(sys.config, packet.content)
+				err = pdu.validate(packet.content)
 				if err != nil {
 					sys.logger.send(warn, err)
 				} else {
@@ -95,8 +98,7 @@ Loop:
 	}
 }
 
-func signalProcess(sys *system) *sign {
-	var err error
+func signalProcess() *sign {
 	signChan := make(chan os.Signal)
 	signal.Notify(signChan)
 
@@ -110,14 +112,16 @@ func signalProcess(sys *system) *sign {
 		for s := range signChan {
 			switch s {
 			case syscall.SIGHUP:
-				if sys.config, err = readConfig(); err != nil {
-					log.Fatal(err)
+				if config, err := readConfig(); err != nil {
+					sys.logger.send(erro, err)
+				} else {
+					sys.config = config
 				}
-				if sys.socket.leaveMcast() != nil {
-					log.Println()
+				if err := sys.socket.leaveMcast(); err != nil {
+					sys.logger.send(erro, err)
 				}
-				if sys.socket.joinMcast() != nil {
-					log.Println()
+				if err := sys.socket.joinMcast(); err != nil {
+					sys.logger.send(erro, err)
 				}
 				sign.resetSched <- true
 			case os.Interrupt:

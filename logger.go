@@ -23,7 +23,7 @@ type logEntry struct {
 	message string
 }
 
-func logProcess(sys *system) chan<- logEntry {
+func logProcess() chan<- logEntry {
 	logChan := make(chan logEntry, 10)
 
 	go func() {
@@ -54,18 +54,24 @@ func logProcess(sys *system) chan<- logEntry {
 	return logChan
 }
 
-func (l logger) send(lv uint8, mess interface{}) {
-	switch mess.(type) {
+func (l logger) send(lv uint8, msg interface{}) {
+	switch msg.(type) {
 	case error:
-		l <- logEntry{lv, mess.(error).Error()}
+		l <- logEntry{lv, msg.(error).Error()}
 		if lv == 1 {
 			time.Sleep(100 * time.Millisecond)
 			os.Exit(1)
 		}
 	case string:
-		l <- logEntry{lv, mess.(string)}
+		l <- logEntry{lv, msg.(string)}
 	case *pdu:
-		m := fmt.Sprintf("%+v\n", mess)
+		m := fmt.Sprintf("%+v\n", msg)
+		l <- logEntry{lv, m}
+	case map[uint64]*adj:
+		m := "Adjustments:\n"
+		for _, v := range msg.(map[uint64]*adj) {
+			m += fmt.Sprintf("%v\n", v.String())
+		}
 		l <- logEntry{lv, m}
 	}
 }

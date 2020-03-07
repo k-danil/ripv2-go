@@ -10,10 +10,9 @@ import (
 type socket struct {
 	mux     sync.Mutex
 	connect *ipv4.PacketConn
-	config  *config
 }
 
-func socketOpen(c *config) (*socket, error) {
+func socketOpen() (*socket, error) {
 	s, err := net.ListenPacket("udp4", "0.0.0.0:520")
 	if err != nil {
 		return nil, err
@@ -30,7 +29,6 @@ func socketOpen(c *config) (*socket, error) {
 
 	socket := &socket{
 		connect: p,
-		config:  c,
 	}
 
 	return socket, nil
@@ -39,7 +37,7 @@ func socketOpen(c *config) (*socket, error) {
 func (s *socket) joinMcast() error {
 	group := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
 
-	for ifc := range s.config.Interfaces {
+	for ifc := range sys.config.Interfaces {
 		ifi, err := net.InterfaceByName(ifc)
 		if err != nil {
 			return err
@@ -54,7 +52,7 @@ func (s *socket) joinMcast() error {
 func (s *socket) leaveMcast() error {
 	group := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
 
-	for ifc := range s.config.Interfaces {
+	for ifc := range sys.config.Interfaces {
 		ifi, err := net.InterfaceByName(ifc)
 		if err != nil {
 			return err

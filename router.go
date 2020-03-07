@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"sync"
 	"time"
 )
@@ -26,7 +25,6 @@ const (
 type adjTable struct {
 	entry  map[uint64]*adj
 	mux    sync.Mutex
-	system *system
 	change bool
 }
 
@@ -43,13 +41,13 @@ type adj struct {
 
 func (a *adj) String() string {
 	return fmt.Sprintf(
-		"ip:%v mask:%v nextHop:%v ifi:%v metric:%v timestamp:%v kill:%v change:%v",
+		"ip:%v mask:%v nextHop:%v ifn:%v metric:%v timestamp:%v kill:%v change:%v",
 		uintToIP(a.ip), uintToIP(a.mask), uintToIP(a.nextHop), a.ifn, a.metric, a.timestamp, a.kill, a.change,
 	)
 }
 
-func initTable(sys *system) *adjTable {
-	a := &adjTable{system: sys}
+func initTable() *adjTable {
+	a := &adjTable{}
 	a.entry = make(map[uint64]*adj)
 	go a.scheduler()
 
@@ -59,19 +57,18 @@ func initTable(sys *system) *adjTable {
 }
 
 func (a *adjTable) scheduler() {
-	a.system.logger.send(info, "starting scheduler")
+	sys.logger.send(info, "starting scheduler")
 	tWorker := time.NewTicker(5 * time.Second)
-	tKeepAlive := time.NewTicker(time.Duration(a.system.config.Timers.UpdateTimer) * time.Second)
+	tKeepAlive := time.NewTicker(time.Duration(sys.config.Timers.UpdateTimer) * time.Second)
 	for {
 		select {
 		case <-tKeepAlive.C:
 			go a.pduPerIf(regular)
 
-			//TODO Move to subscriptions
-			for i := range a.system.config.Interfaces {
+			for i := range sys.config.Interfaces {
 				l, err := getLocalTable(i)
 				if err != nil {
-					log.Println(err)
+					sys.logger.send(erro, err)
 				} else {
 					a.adjProcess(l)
 				}
@@ -81,16 +78,14 @@ func (a *adjTable) scheduler() {
 				go a.pduPerIf(changed)
 			}
 
-			a.clear()
-		case <-a.system.signal.getAdj:
-			for _, ent := range a.entry {
-				log.Printf("%+v\n", ent)
-			}
-		case <-a.system.signal.stopSched:
-			defer a.system.logger.send(info, "stoping scheduler")
+			a.clear(&sys.config.Timers)
+		case <-sys.signal.getAdj:
+			sys.logger.send(user, a.entry)
+		case <-sys.signal.stopSched:
+			defer sys.logger.send(info, "stoping scheduler")
 			return
-		case <-a.system.signal.resetSched:
-			defer a.system.logger.send(info, "stoping scheduler")
+		case <-sys.signal.resetSched:
+			defer sys.logger.send(info, "stoping scheduler")
 			go a.scheduler()
 			return
 		}
@@ -106,18 +101,18 @@ func (a *adjTable) adjProcess(p *pdu) {
 	}
 }
 
-func (a *adjTable) clear() {
+func (a *adjTable) clear(t *timers) {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 	ctime := time.Now().Unix()
 	for key, val := range a.entry {
 		switch timer := ctime - val.timestamp; {
-		case timer > (a.system.config.Timers.GarbageTimer + a.system.config.Timers.TimeoutTimer):
+		case timer > (t.GarbageTimer + t.TimeoutTimer):
 			if val.kill {
 				go removeLocalRoute(val.ip, val.mask)
 				delete(a.entry, key)
 			}
-		case timer > a.system.config.Timers.TimeoutTimer:
+		case timer > t.TimeoutTimer:
 			if !val.kill {
 				val.metric = infMetric
 				val.change = true
@@ -132,7 +127,7 @@ func (a *adjTable) requestProcess(p *pdu) {
 	if p.routeEntries[0].metric == infMetric && p.routeEntries[0].network == 0 {
 		pds := a.adjToPdu(regular, p.serviceFields.ifn)
 		for _, pdu := range pds {
-			a.system.socket.sendMcast(pdu.pduToByte(a.system.config), pdu.serviceFields.ifn)
+			sys.socket.sendMcast(pdu.pduToByte(), pdu.serviceFields.ifn)
 		}
 		return
 	}
@@ -144,7 +139,7 @@ func (a *adjTable) requestProcess(p *pdu) {
 			pEnt.metric = a.entry[netid].metric
 		}
 	}
-	a.system.socket.sendUcast(p.pduToByte(a.system.config), uintToIP(p.serviceFields.ip))
+	sys.socket.sendUcast(p.pduToByte(), uintToIP(p.serviceFields.ip))
 }
 
 func (a *adjTable) responseProcess(p *pdu) {
@@ -162,14 +157,16 @@ func (a *adjTable) responseProcess(p *pdu) {
 			srcIP = p.serviceFields.ip
 		}
 
+		metric := pEnt.metric + 1
+
 		if a.entry[netid] == nil {
-			if (pEnt.metric + 1) < infMetric {
+			if metric < infMetric {
 				a.entry[netid] = &adj{
 					ip:        pEnt.network,
 					mask:      pEnt.mask,
 					nextHop:   srcIP,
 					ifn:       p.serviceFields.ifn,
-					metric:    pEnt.metric + 1,
+					metric:    metric,
 					timestamp: p.serviceFields.timestamp,
 					change:    true,
 				}
@@ -178,7 +175,7 @@ func (a *adjTable) responseProcess(p *pdu) {
 			}
 		} else {
 			if a.entry[netid].nextHop == srcIP {
-				switch metric := pEnt.metric + 1; {
+				switch {
 				case metric == infMetric:
 					if a.entry[netid].metric != infMetric {
 						a.entry[netid].metric = metric
@@ -196,13 +193,13 @@ func (a *adjTable) responseProcess(p *pdu) {
 					a.entry[netid].timestamp = p.serviceFields.timestamp
 				}
 			} else {
-				switch metric := pEnt.metric + 1; {
+				switch {
 				case metric == a.entry[netid].metric:
 					if a.entry[netid].kill == true {
 						a.entry[netid].nextHop = srcIP
 						a.entry[netid].ifn = p.serviceFields.ifn
 						a.entry[netid].timestamp = p.serviceFields.timestamp
-						a.entry[netid].metric = metric + 1
+						a.entry[netid].metric = metric
 						a.entry[netid].change = true
 						a.entry[netid].kill = false
 
@@ -213,7 +210,7 @@ func (a *adjTable) responseProcess(p *pdu) {
 					a.entry[netid].nextHop = srcIP
 					a.entry[netid].ifn = p.serviceFields.ifn
 					a.entry[netid].timestamp = p.serviceFields.timestamp
-					a.entry[netid].metric = metric + 1
+					a.entry[netid].metric = metric
 					a.entry[netid].change = true
 					a.entry[netid].kill = false
 
@@ -226,7 +223,7 @@ func (a *adjTable) responseProcess(p *pdu) {
 }
 
 func (a *adjTable) pduPerIf(selector uint8) {
-	for ifn, ifp := range a.system.config.Interfaces {
+	for ifn, ifp := range sys.config.Interfaces {
 		if ifp.Passive {
 			//Not send update to passive interface
 			continue
@@ -234,7 +231,7 @@ func (a *adjTable) pduPerIf(selector uint8) {
 
 		pds := a.adjToPdu(selector, ifn)
 		for _, pdu := range pds {
-			a.system.socket.sendMcast(pdu.pduToByte(a.system.config), pdu.serviceFields.ifn)
+			sys.socket.sendMcast(pdu.pduToByte(), pdu.serviceFields.ifn)
 		}
 
 		if selector == changed {
@@ -256,13 +253,8 @@ func (a *adjTable) adjToPdu(selector uint8, ifn string) []*pdu {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 
-	//TODO Limit route entry per pdu
 	pds := make([]*pdu, 0)
-
-	pdu := &pdu{
-		header:        header{command: 2, version: 2},
-		serviceFields: serviceFields{ifn: ifn},
-	}
+	entries := make([]routeEntry, 0)
 
 	switch selector {
 	case regular:
@@ -279,7 +271,7 @@ func (a *adjTable) adjToPdu(selector uint8, ifn string) []*pdu {
 				afi:      afiIPv4,
 				routeTag: 0,
 			}
-			pdu.routeEntries = append(pdu.routeEntries, routeEntry)
+			entries = append(entries, routeEntry)
 		}
 	case changed:
 		for _, adj := range a.entry {
@@ -297,19 +289,51 @@ func (a *adjTable) adjToPdu(selector uint8, ifn string) []*pdu {
 					routeTag: 0,
 				}
 				adj.change = false
-				pdu.routeEntries = append(pdu.routeEntries, routeEntry)
+				entries = append(entries, routeEntry)
 			}
 		}
 	case gettable:
-		pdu.header.command = request
+		pdu := &pdu{
+			header:        header{command: request, version: 2},
+			serviceFields: serviceFields{ifn: ifn},
+		}
 		pdu.routeEntries = []routeEntry{{metric: 16}}
+		return append(pds, pdu)
 	}
 
-	if len(pdu.routeEntries) > 0 {
-		//Pointless to return zero sized pdu
-		pds := append(pds, pdu)
-		return pds
+	var msgSize int
+
+	switch sys.config.Interfaces[ifn].KeyChain.AuthType {
+	case authHash:
+		msgSize = sys.config.Local.MsgSize - 2
+	case authPlain:
+		msgSize = sys.config.Local.MsgSize - 1
+	case authNon:
+		msgSize = sys.config.Local.MsgSize
 	}
+
+	if len(entries) > 0 {
+		pds = reLimit(msgSize, entries, ifn)
+	}
+
+	return pds
+}
+
+func reLimit(limit int, entries []routeEntry, ifn string) []*pdu {
+	size := (len(entries) / limit) + 1
+	pds := make([]*pdu, size)
+
+	for i := 0; i < size; i++ {
+		pds[i] = &pdu{
+			header:        header{command: response, version: 2},
+			serviceFields: serviceFields{ifn: ifn},
+		}
+	}
+
+	for pos, entry := range entries {
+		pds[pos/limit].routeEntries = append(pds[pos/limit].routeEntries, entry)
+	}
+
 	return pds
 }
 

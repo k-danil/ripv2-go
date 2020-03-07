@@ -1,6 +1,7 @@
 [local]
 metric = 120
-log = 1
+msgSize = 25
+log = 4
 
 [timers]
 updateTimer = 30

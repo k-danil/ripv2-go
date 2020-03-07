@@ -4,10 +4,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const (
-	settings string = "./src/github.com/n00btype/ripv2-go/setting.toml"
-)
-
 type config struct {
 	Interfaces map[string]ifc
 	Timers     timers
@@ -15,8 +11,9 @@ type config struct {
 }
 
 type local struct {
-	Metric int
-	Log    uint8
+	Metric  int
+	MsgSize int
+	Log     uint8
 }
 
 type timers struct {
@@ -27,8 +24,6 @@ type timers struct {
 
 type ifc struct {
 	Passive  bool
-	Auth     bool
-	Timers   timers
 	KeyChain keyChain
 }
 
@@ -39,7 +34,7 @@ type keyChain struct {
 
 func readConfig() (*config, error) {
 	var conf config
-	_, err := toml.DecodeFile(settings, &conf)
+	_, err := toml.DecodeFile(sys.cfgPath, &conf)
 	if err != nil {
 		return nil, err
 	}
