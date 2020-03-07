@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"log"
 	"net"
 	"time"
 
@@ -99,20 +98,21 @@ func removeLocalRoute(network, mask uint32) error {
 	return nil
 }
 
-func clearLocalTable() {
+func clearLocalTable() error {
 	filter := &netlink.Route{
 		Protocol: 10,
 	}
 	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, filter, netlink.RT_FILTER_PROTOCOL)
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 
 	for _, route := range routes {
 		if err := netlink.RouteDel(&route); err != nil {
-			log.Println(route, err)
+			return err
 		}
 	}
+	return nil
 }
 
 func isLocalAddress(addr net.IP) (bool, error) {

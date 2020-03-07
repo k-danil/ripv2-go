@@ -45,6 +45,10 @@ func main() {
 	if sys.config, err = readConfig(); err != nil {
 		sys.logger.send(fatal, err)
 	}
+	err = sys.config.validate()
+	if err != nil {
+		sys.logger.send(warn, err)
+	}
 
 	if sys.socket, err = socketOpen(); err != nil {
 		sys.logger.send(fatal, err)
@@ -116,6 +120,10 @@ func signalProcess() *sign {
 					sys.logger.send(erro, err)
 				} else {
 					sys.config = config
+				}
+				err := sys.config.validate()
+				if err != nil {
+					sys.logger.send(warn, err)
 				}
 				if err := sys.socket.leaveMcast(); err != nil {
 					sys.logger.send(erro, err)

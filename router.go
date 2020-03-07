@@ -109,7 +109,10 @@ func (a *adjTable) clear(t *timers) {
 		switch timer := ctime - val.timestamp; {
 		case timer > (t.GarbageTimer + t.TimeoutTimer):
 			if val.kill {
-				go removeLocalRoute(val.ip, val.mask)
+				err := removeLocalRoute(val.ip, val.mask)
+				if err != nil {
+					sys.logger.send(erro, err)
+				}
 				delete(a.entry, key)
 			}
 		case timer > t.TimeoutTimer:
@@ -170,7 +173,10 @@ func (a *adjTable) responseProcess(p *pdu) {
 					timestamp: p.serviceFields.timestamp,
 					change:    true,
 				}
-				addLocalRoute(pEnt.network, pEnt.mask, srcIP)
+				err := addLocalRoute(pEnt.network, pEnt.mask, srcIP)
+				if err != nil {
+					sys.logger.send(erro, err)
+				}
 				a.change = true
 			}
 		} else {
@@ -203,7 +209,10 @@ func (a *adjTable) responseProcess(p *pdu) {
 						a.entry[netid].change = true
 						a.entry[netid].kill = false
 
-						replaceLocalRoute(pEnt.network, pEnt.mask, srcIP)
+						err := replaceLocalRoute(pEnt.network, pEnt.mask, srcIP)
+						if err != nil {
+							sys.logger.send(erro, err)
+						}
 						a.change = true
 					}
 				case metric < a.entry[netid].metric:
@@ -214,7 +223,10 @@ func (a *adjTable) responseProcess(p *pdu) {
 					a.entry[netid].change = true
 					a.entry[netid].kill = false
 
-					replaceLocalRoute(pEnt.network, pEnt.mask, srcIP)
+					err := replaceLocalRoute(pEnt.network, pEnt.mask, srcIP)
+					if err != nil {
+						sys.logger.send(erro, err)
+					}
 					a.change = true
 				}
 			}

@@ -41,6 +41,6 @@ garbageTimer = 120
 
 ---
 TODO:
-* Support startup flags
-* Local metric configuration +-
 * Test suit
+* Neighbor list
+* Unicast neighbors
