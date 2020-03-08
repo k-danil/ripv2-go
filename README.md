@@ -44,3 +44,4 @@ TODO:
 * Test suit
 * Neighbor list
 * Unicast neighbors
+* Remove deadlock in packet receiver when no valid interface provided

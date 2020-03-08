@@ -118,9 +118,12 @@ func (p *packet) parse() *pdu {
 				pdu.serviceFields.authType = authType
 			}
 		case afiIPv4:
-			routeEntry := routeEntry{}
-			binary.Read(buf, binary.BigEndian, &routeEntry)
-			pdu.routeEntries = append(pdu.routeEntries, routeEntry)
+			if pdu.serviceFields.authType == authHash {
+				pdu.routeEntries = make([]routeEntry, buf.Len()/20-1)
+			} else {
+				pdu.routeEntries = make([]routeEntry, buf.Len()/20)
+			}
+			binary.Read(buf, binary.BigEndian, &pdu.routeEntries)
 		case afiGiveAll:
 			routeEntry := routeEntry{}
 			binary.Read(buf, binary.BigEndian, &routeEntry)
@@ -131,38 +134,26 @@ func (p *packet) parse() *pdu {
 	return pdu
 }
 
-func (p *pdu) validate(content []byte) error {
+func (p *pdu) validate(content []byte, keyChain keyChain) error {
 	if p.header.Version != 2 {
 		return errors.New("Incorrect RIP version (use 2)")
 	}
 
-	ifn := p.serviceFields.ifn
-
-	if p.serviceFields.authType > 0 {
-		if sys.config.Interfaces[ifn].KeyChain.AuthType > 0 {
-			if p.serviceFields.authType != sys.config.Interfaces[ifn].KeyChain.AuthType {
-				return errors.New("Incorrect AuthType")
+	if p.serviceFields.authType == keyChain.AuthType {
+		switch p.serviceFields.authType {
+		case authPlain:
+			err := p.authPlain(keyChain.AuthKey)
+			if err != nil {
+				return err
 			}
-
-			switch p.serviceFields.authType {
-			case authPlain:
-				err := p.authPlain(sys.config.Interfaces[ifn].KeyChain.AuthKey)
-				if err != nil {
-					return err
-				}
-			case authHash:
-				err := p.authHash(sys.config.Interfaces[ifn].KeyChain.AuthKey, content)
-				if err != nil {
-					return err
-				}
+		case authHash:
+			err := p.authHash(keyChain.AuthKey, content)
+			if err != nil {
+				return err
 			}
-		} else {
-			return errors.New("Authentication is not configured on interface")
 		}
 	} else {
-		if sys.config.Interfaces[ifn].KeyChain.AuthType > 0 {
-			return errors.New("Expect authenticated packet on interface")
-		}
+		return errors.New("Incorrect AuthType")
 	}
 
 	if p.header.Command == response {

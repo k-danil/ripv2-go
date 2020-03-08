@@ -93,7 +93,7 @@ Loop:
 				if sys.config.Local.Log == 5 {
 					sys.logger.send(debug, pdu)
 				}
-				err = pdu.validate(packet.content)
+				err = pdu.validate(packet.content, sys.config.Interfaces[ifc.Name].KeyChain)
 				if err != nil {
 					sys.logger.send(warn, err)
 				} else {
