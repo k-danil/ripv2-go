@@ -70,7 +70,7 @@ func (a *adjTable) scheduler() {
 				if err != nil {
 					sys.logger.send(erro, err)
 				} else {
-					a.adjProcess(l)
+					a.process(l)
 				}
 			}
 		case <-tWorker.C:
@@ -92,8 +92,8 @@ func (a *adjTable) scheduler() {
 	}
 }
 
-func (a *adjTable) adjProcess(p *pdu) {
-	switch p.header.command {
+func (a *adjTable) process(p *pdu) {
+	switch p.header.Command {
 	case request:
 		a.requestProcess(p)
 	case response:
@@ -127,7 +127,7 @@ func (a *adjTable) clear(t *timers) {
 }
 
 func (a *adjTable) requestProcess(p *pdu) {
-	if p.routeEntries[0].metric == infMetric && p.routeEntries[0].network == 0 {
+	if p.routeEntries[0].Metric == infMetric && p.routeEntries[0].Network == 0 {
 		pds := a.adjToPdu(regular, p.serviceFields.ifn)
 		for _, pdu := range pds {
 			sys.socket.sendMcast(pdu.pduToByte(), pdu.serviceFields.ifn)
@@ -135,11 +135,11 @@ func (a *adjTable) requestProcess(p *pdu) {
 		return
 	}
 	for _, pEnt := range p.routeEntries {
-		netid := ipmask(pEnt.network, pEnt.mask)
+		netid := ipmask(pEnt.Network, pEnt.Mask)
 		if a.entry[netid] == nil {
-			pEnt.metric = infMetric
+			pEnt.Metric = infMetric
 		} else {
-			pEnt.metric = a.entry[netid].metric
+			pEnt.Metric = a.entry[netid].metric
 		}
 	}
 	sys.socket.sendUcast(p.pduToByte(), uintToIP(p.serviceFields.ip))
@@ -151,29 +151,29 @@ func (a *adjTable) responseProcess(p *pdu) {
 
 	for _, pEnt := range p.routeEntries {
 		//Calculate id to map
-		netid := ipmask(pEnt.network, pEnt.mask)
+		netid := ipmask(pEnt.Network, pEnt.Mask)
 		//Default next-hop is 0.0.0.0 but it can be anything else
 		var srcIP uint32
-		if pEnt.nextHop != 0 {
-			srcIP = pEnt.nextHop
+		if pEnt.NextHop != 0 {
+			srcIP = pEnt.NextHop
 		} else {
 			srcIP = p.serviceFields.ip
 		}
 
-		metric := pEnt.metric + 1
+		metric := pEnt.Metric + 1
 
 		if a.entry[netid] == nil {
 			if metric < infMetric {
 				a.entry[netid] = &adj{
-					ip:        pEnt.network,
-					mask:      pEnt.mask,
+					ip:        pEnt.Network,
+					mask:      pEnt.Mask,
 					nextHop:   srcIP,
 					ifn:       p.serviceFields.ifn,
 					metric:    metric,
 					timestamp: p.serviceFields.timestamp,
 					change:    true,
 				}
-				err := addLocalRoute(pEnt.network, pEnt.mask, srcIP)
+				err := addLocalRoute(pEnt.Network, pEnt.Mask, srcIP)
 				if err != nil {
 					sys.logger.send(erro, err)
 				}
@@ -209,7 +209,7 @@ func (a *adjTable) responseProcess(p *pdu) {
 						a.entry[netid].change = true
 						a.entry[netid].kill = false
 
-						err := replaceLocalRoute(pEnt.network, pEnt.mask, srcIP)
+						err := replaceLocalRoute(pEnt.Network, pEnt.Mask, srcIP)
 						if err != nil {
 							sys.logger.send(erro, err)
 						}
@@ -223,7 +223,7 @@ func (a *adjTable) responseProcess(p *pdu) {
 					a.entry[netid].change = true
 					a.entry[netid].kill = false
 
-					err := replaceLocalRoute(pEnt.network, pEnt.mask, srcIP)
+					err := replaceLocalRoute(pEnt.Network, pEnt.Mask, srcIP)
 					if err != nil {
 						sys.logger.send(erro, err)
 					}
@@ -276,12 +276,12 @@ func (a *adjTable) adjToPdu(selector uint8, ifn string) []*pdu {
 				continue
 			}
 			routeEntry := routeEntry{
-				network:  adj.ip,
-				mask:     adj.mask,
-				nextHop:  0,
-				metric:   adj.metric,
-				afi:      afiIPv4,
-				routeTag: 0,
+				Network:  adj.ip,
+				Mask:     adj.mask,
+				NextHop:  0,
+				Metric:   adj.metric,
+				AFI:      afiIPv4,
+				RouteTag: 0,
 			}
 			entries = append(entries, routeEntry)
 		}
@@ -293,12 +293,12 @@ func (a *adjTable) adjToPdu(selector uint8, ifn string) []*pdu {
 					continue
 				}
 				routeEntry := routeEntry{
-					network:  adj.ip,
-					mask:     adj.mask,
-					nextHop:  0,
-					metric:   adj.metric,
-					afi:      afiIPv4,
-					routeTag: 0,
+					Network:  adj.ip,
+					Mask:     adj.mask,
+					NextHop:  0,
+					Metric:   adj.metric,
+					AFI:      afiIPv4,
+					RouteTag: 0,
 				}
 				adj.change = false
 				entries = append(entries, routeEntry)
@@ -306,10 +306,10 @@ func (a *adjTable) adjToPdu(selector uint8, ifn string) []*pdu {
 		}
 	case gettable:
 		pdu := &pdu{
-			header:        header{command: request, version: 2},
+			header:        header{Command: request, Version: 2},
 			serviceFields: serviceFields{ifn: ifn},
 		}
-		pdu.routeEntries = []routeEntry{{metric: 16}}
+		pdu.routeEntries = append(pdu.routeEntries, routeEntry{Metric: 16})
 		return append(pds, pdu)
 	}
 
@@ -337,7 +337,7 @@ func reLimit(limit int, entries []routeEntry, ifn string) []*pdu {
 
 	for i := 0; i < size; i++ {
 		pds[i] = &pdu{
-			header:        header{command: response, version: 2},
+			header:        header{Command: response, Version: 2},
 			serviceFields: serviceFields{ifn: ifn},
 		}
 	}

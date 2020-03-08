@@ -54,7 +54,7 @@ func main() {
 		sys.logger.send(fatal, err)
 	}
 
-	a := initTable()
+	adj := initTable()
 
 	if err = sys.socket.joinMcast(); err != nil {
 		sys.logger.send(erro, err)
@@ -70,11 +70,13 @@ Loop:
 		case <-sys.signal.stopReceive:
 			break Loop
 		default:
-			b := make([]byte, 514) //Maximum size of RIP pdu - 504byte
+			b := make([]byte, (sys.config.Local.MsgSize*20 + 4))
+
 			s, cm, _, err := sys.socket.connect.ReadFrom(b)
 			if err != nil {
 				sys.logger.send(fatal, err)
 			}
+
 			ifc, err := net.InterfaceByIndex(cm.IfIndex)
 			if err != nil {
 				sys.logger.send(erro, err)
@@ -95,7 +97,7 @@ Loop:
 				if err != nil {
 					sys.logger.send(warn, err)
 				} else {
-					a.adjProcess(pdu)
+					adj.process(pdu)
 				}
 			}()
 		}

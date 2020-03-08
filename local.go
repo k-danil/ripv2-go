@@ -22,8 +22,8 @@ func getLocalTable(ifc string) (*pdu, error) {
 	// TODO Check interface state
 	pdu := &pdu{
 		header: header{
-			version: 2,
-			command: 2,
+			Version: 2,
+			Command: 2,
 		},
 		serviceFields: serviceFields{
 			ip:        binary.BigEndian.Uint32([]byte{127, 0, 0, 1}),
@@ -36,11 +36,11 @@ func getLocalTable(ifc string) (*pdu, error) {
 			continue
 		}
 		routeEntry := routeEntry{
-			afi:     afiIPv4,
-			network: binary.BigEndian.Uint32(iplist[i].IP.Mask(iplist[i].Mask)),
-			mask:    binary.BigEndian.Uint32(iplist[i].Mask),
-			metric:  0,
-			nextHop: 0,
+			AFI:     afiIPv4,
+			Network: binary.BigEndian.Uint32(iplist[i].IP.Mask(iplist[i].Mask)),
+			Mask:    binary.BigEndian.Uint32(iplist[i].Mask),
+			Metric:  0,
+			NextHop: 0,
 		}
 		pdu.routeEntries = append(pdu.routeEntries, routeEntry)
 	}

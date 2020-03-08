@@ -18,21 +18,20 @@ func (pdu *pdu) pduToByte() []byte {
 
 	switch sys.config.Interfaces[ifn].KeyChain.AuthType {
 	case authPlain:
-		pass := padKey(sys.config.Interfaces[ifn].KeyChain.AuthKey, 16)
 		plain := authKeyEntry{
-			afi:      afiAuth,
-			authType: authPlain,
+			AFI:      afiAuth,
+			AuthType: authPlain,
+			Key:      padKey(sys.config.Interfaces[ifn].KeyChain.AuthKey),
 		}
 		binary.Write(buf, binary.BigEndian, plain)
-		binary.Write(buf, binary.BigEndian, []byte(pass))
 	case authHash:
 		hash := authHashEntry{
-			afi:      afiAuth,
-			authType: authHash,
-			packLng:  uint16(24 + (len(pdu.routeEntries) * 20)),
-			keyID:    1,
-			authLng:  16,
-			sqn:      uint32(time.Now().Unix()),
+			AFI:      afiAuth,
+			AuthType: authHash,
+			PackLng:  uint16(24 + (len(pdu.routeEntries) * 20)),
+			KeyID:    1,
+			AuthLng:  20,
+			SQN:      uint32(time.Now().Unix()),
 		}
 		binary.Write(buf, binary.BigEndian, hash)
 	}
@@ -40,13 +39,12 @@ func (pdu *pdu) pduToByte() []byte {
 	binary.Write(buf, binary.BigEndian, pdu.routeEntries)
 
 	if sys.config.Interfaces[ifn].KeyChain.AuthType == authHash {
-		pass := padKey(sys.config.Interfaces[ifn].KeyChain.AuthKey, 16)
 		key := authKeyEntry{
-			afi:      afiAuth,
-			authType: authKey,
+			AFI:      afiAuth,
+			AuthType: authKey,
+			Key:      padKey(sys.config.Interfaces[ifn].KeyChain.AuthKey),
 		}
 		binary.Write(buf, binary.BigEndian, key)
-		binary.Write(buf, binary.BigEndian, []byte(pass))
 		hash := md5.Sum(buf.Bytes())
 		buf.Truncate(28 + (len(pdu.routeEntries) * 20))
 		binary.Write(buf, binary.BigEndian, hash)
@@ -55,10 +53,12 @@ func (pdu *pdu) pduToByte() []byte {
 	return buf.Bytes()
 }
 
-func padKey(key string, size int) string {
+func padKey(key string) [16]byte {
+	var arr [16]byte
 	k := key
-	for l := 0; l < (size - len(key)); l++ {
+	for l := 0; l < (16 - len(key)); l++ {
 		k += "\x00"
 	}
-	return k
+	copy(arr[:], k)
+	return arr
 }

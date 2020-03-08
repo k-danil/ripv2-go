@@ -4,11 +4,11 @@ Simple ripv2 deaemon implimented again RFC2453, RFC4822.
 ---
 Incoming signals:
 
-SIGHUP - reinit config
+**SIGHUP** - reinit config
 
-SIGUSR1 - print adj table to log
+**SIGUSR1** - print adj table to log
 
-SIGTERM - gracefull stop
+**SIGTERM** - gracefull stop
 
 ---
 Basic config in toml:
