@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"sync"
+	"time"
 
 	"golang.org/x/net/ipv4"
 )
@@ -69,6 +70,10 @@ func (s *socket) close() error {
 	s.connect.Close()
 
 	return nil
+}
+
+func (s *socket) timeout(c int) {
+	s.connect.SetReadDeadline(time.Now().Add(time.Millisecond * time.Duration(c)))
 }
 
 func (s *socket) sendMcast(data []byte, ifn string) error {

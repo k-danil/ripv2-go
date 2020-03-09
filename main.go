@@ -21,6 +21,7 @@ type sign struct {
 	stopSched   chan bool
 	stopReceive chan bool
 	getAdj      chan bool
+	getNbr      chan bool
 }
 
 var sys = system{}
@@ -54,7 +55,8 @@ func main() {
 		sys.logger.send(fatal, err)
 	}
 
-	adj := initTable()
+	adj := initAdjTable()
+	nbr := initNbrTable()
 
 	if err = sys.socket.joinMcast(); err != nil {
 		sys.logger.send(erro, err)
@@ -73,8 +75,10 @@ Loop:
 			b := make([]byte, (sys.config.Local.MsgSize*20 + 4))
 
 			s, cm, _, err := sys.socket.connect.ReadFrom(b)
-			if err != nil {
+			if err, ok := err.(net.Error); ok && !err.Timeout() {
 				sys.logger.send(fatal, err)
+			} else if err, ok := err.(net.Error); ok && err.Timeout() {
+				break
 			}
 
 			ifc, err := net.InterfaceByIndex(cm.IfIndex)
@@ -97,6 +101,11 @@ Loop:
 				if err != nil {
 					sys.logger.send(warn, err)
 				} else {
+					if pdu.serviceFields.authType != 0 {
+						nbr.update(pdu.serviceFields.ip, state|auth)
+					} else {
+						nbr.update(pdu.serviceFields.ip, state)
+					}
 					adj.process(pdu)
 				}
 			}()
@@ -110,6 +119,7 @@ func signalProcess() *sign {
 
 	sign := &sign{}
 	sign.getAdj = make(chan bool)
+	sign.getNbr = make(chan bool)
 	sign.resetSched = make(chan bool)
 	sign.stopReceive = make(chan bool)
 	sign.stopSched = make(chan bool)
@@ -137,9 +147,12 @@ func signalProcess() *sign {
 			case os.Interrupt:
 				sign.stopSched <- true
 				sign.stopReceive <- true
+				sys.socket.timeout(1)
 				return
 			case syscall.SIGUSR1:
 				sign.getAdj <- true
+			case syscall.SIGUSR2:
+				sign.getNbr <- true
 			}
 		}
 	}()

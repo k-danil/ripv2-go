@@ -6,7 +6,9 @@ Incoming signals:
 
 **SIGHUP** - reinit config
 
-**SIGUSR1** - print adj table to log
+**SIGUSR1** - print adjustments table to log
+
+**SIGUSR2** - print neighbors table to log
 
 **SIGTERM** - gracefull stop
 
@@ -42,6 +44,4 @@ garbageTimer = 120
 ---
 TODO:
 * Test suit
-* Neighbor list
 * Unicast neighbors
-* Remove deadlock in packet receiver when no valid interface provided

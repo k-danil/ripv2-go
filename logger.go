@@ -73,5 +73,11 @@ func (l logger) send(lv uint8, msg interface{}) {
 			m += fmt.Sprintf("%v\n", v.String())
 		}
 		l <- logEntry{lv, m}
+	case map[uint32]*nbr:
+		m := "Neighbors:\n"
+		for ip, v := range msg.(map[uint32]*nbr) {
+			m += fmt.Sprintf("ip: %v\t%v\n", uintToIP(ip), v.String())
+		}
+		l <- logEntry{lv, m}
 	}
 }

@@ -40,16 +40,26 @@ type adj struct {
 }
 
 func (a *adj) String() string {
+	ctime := time.Now().Unix()
 	return fmt.Sprintf(
-		"ip:%v mask:%v nextHop:%v ifn:%v metric:%v timestamp:%v kill:%v change:%v",
-		uintToIP(a.ip), uintToIP(a.mask), uintToIP(a.nextHop), a.ifn, a.metric, a.timestamp, a.kill, a.change,
+		"ip:%v mask:%v nextHop:%v ifn:%v metric:%v uptime:%v kill:%v change:%v",
+		uintToIP(a.ip), uintToIP(a.mask), uintToIP(a.nextHop), a.ifn, a.metric, ctime-a.timestamp, a.kill, a.change,
 	)
 }
 
-func initTable() *adjTable {
+func initAdjTable() *adjTable {
 	a := &adjTable{}
 	a.entry = make(map[uint64]*adj)
 	go a.scheduler()
+
+	for i := range sys.config.Interfaces {
+		l, err := getLocalTable(i)
+		if err != nil {
+			sys.logger.send(erro, err)
+		} else {
+			a.process(l)
+		}
+	}
 
 	go a.pduPerIf(gettable)
 
