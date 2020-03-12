@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
+	"net"
 
 	"github.com/BurntSushi/toml"
 )
@@ -14,13 +16,21 @@ const (
 	defaultLocalMetric  = 10
 )
 
-type config struct {
+type tempConfig struct {
 	Interfaces map[string]ifc
+	Neighbors  map[string]nbrs
 	Timers     timers
-	Local      local
+	Global     global
 }
 
-type local struct {
+type config struct {
+	Interfaces map[int]ifc
+	Neighbors  map[uint32]nbrs
+	Timers     timers
+	Global     global
+}
+
+type global struct {
 	Metric  int
 	MsgSize int
 	Log     uint8
@@ -37,27 +47,57 @@ type ifc struct {
 	KeyChain keyChain
 }
 
+type nbrs struct {
+	KeyChain keyChain
+}
+
 type keyChain struct {
 	AuthType uint16
 	AuthKey  string
 }
 
 func readConfig() (*config, error) {
+	var tempConfig tempConfig
 	var conf config
-	_, err := toml.DecodeFile(sys.cfgPath, &conf)
+	_, err := toml.DecodeFile(sys.cfgPath, &tempConfig)
 	if err != nil {
 		return nil, err
 	}
+
+	conf = config{
+		Global: tempConfig.Global,
+		Timers: tempConfig.Timers,
+	}
+
+	conf.Interfaces = make(map[int]ifc, 0)
+	conf.Neighbors = make(map[uint32]nbrs, 0)
+
+	for ifn, param := range tempConfig.Interfaces {
+		ifi, err := net.InterfaceByName(ifn)
+		if err != nil {
+			sys.logger.send(erro, err)
+		} else {
+			conf.Interfaces[ifi.Index] = param
+		}
+	}
+
+	for ipn, param := range tempConfig.Neighbors {
+		if net.ParseIP(ipn).To4().IsGlobalUnicast() {
+			ip := binary.BigEndian.Uint32(net.ParseIP(ipn).To4())
+			conf.Neighbors[ip] = param
+		}
+	}
+
 	return &conf, nil
 }
 
 func (c *config) validate() error {
-	if c.Local.Metric == 0 && c.Local.Metric > 255 {
-		c.Local.Metric = defaultLocalMetric
+	if c.Global.Metric == 0 && c.Global.Metric > 255 {
+		c.Global.Metric = defaultLocalMetric
 		return errors.New("local metric must be in range 1-255")
 	}
-	if c.Local.MsgSize < 25 && c.Local.MsgSize > 255 {
-		c.Local.MsgSize = defaultMsgSize
+	if c.Global.MsgSize < 25 && c.Global.MsgSize > 255 {
+		c.Global.MsgSize = defaultMsgSize
 		return errors.New("Number of route entries per update message must be in range 25-255")
 	}
 	if c.Timers.UpdateTimer < 10 && c.Timers.UpdateTimer > 60 {

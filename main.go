@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"net"
 	"os"
@@ -11,6 +12,7 @@ import (
 type system struct {
 	config  *config
 	socket  *socket
+	local   *local
 	signal  *sign
 	logger  logger
 	cfgPath string
@@ -43,6 +45,8 @@ func main() {
 
 	sys.logger.send(info, "starting main")
 
+	clrRoutes()
+
 	if sys.config, err = readConfig(); err != nil {
 		sys.logger.send(fatal, err)
 	}
@@ -62,7 +66,7 @@ func main() {
 		sys.logger.send(erro, err)
 	}
 
-	defer clearLocalTable()
+	defer clrRoutes()
 	defer sys.socket.close()
 	defer sys.logger.send(info, "closing main")
 
@@ -72,7 +76,7 @@ Loop:
 		case <-sys.signal.stopReceive:
 			break Loop
 		default:
-			b := make([]byte, (sys.config.Local.MsgSize*20 + 4))
+			b := make([]byte, (sys.config.Global.MsgSize*20 + 4))
 
 			s, cm, _, err := sys.socket.connect.ReadFrom(b)
 			if err, ok := err.(net.Error); ok && !err.Timeout() {
@@ -81,23 +85,25 @@ Loop:
 				break
 			}
 
-			ifc, err := net.InterfaceByIndex(cm.IfIndex)
-			if err != nil {
-				sys.logger.send(erro, err)
-			}
-
 			go func() {
-				packet, err := readPacket(b[:s], ifc.Name, cm.Src)
+				src := binary.BigEndian.Uint32(cm.Src)
+				packet, err := readPacket(b[:s], cm.IfIndex, src)
 				if err != nil {
 					//Drop weird sourced packet
 					return
 				}
 
 				pdu := packet.parse()
-				if sys.config.Local.Log == 5 {
+				if sys.config.Global.Log == 5 {
 					sys.logger.send(debug, pdu)
 				}
-				err = pdu.validate(packet.content, sys.config.Interfaces[ifc.Name].KeyChain)
+
+				if !cm.Dst.IsMulticast() {
+					err = pdu.validate(packet.content, sys.config.Neighbors[src].KeyChain)
+				} else {
+					err = pdu.validate(packet.content, sys.config.Interfaces[cm.IfIndex].KeyChain)
+				}
+
 				if err != nil {
 					sys.logger.send(warn, err)
 				} else {
@@ -106,7 +112,7 @@ Loop:
 					} else {
 						nbr.update(pdu.serviceFields.ip, state)
 					}
-					adj.process(pdu)
+					adj.procIncom(pdu)
 				}
 			}()
 		}

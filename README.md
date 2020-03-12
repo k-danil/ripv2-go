@@ -18,7 +18,7 @@ Basic config in toml:
 [local]
 metric = 120
 msgSize = 25
-log = 4
+log = 5
 
 [timers]
 updateTimer = 30
@@ -27,12 +27,17 @@ garbageTimer = 120
 
 [interfaces]
  [interfaces.br0]
- auth = true
-   [interfaces.br0.keychain]
+  [interfaces.br0.keychain]
    authType = 3
    authKey = "123"
  [interfaces.lo]
- passive = true
+  passive = true
+
+ [neighbors]
+  [neighbors."192.168.90.1"]
+   [neighbors."192.168.90.1".keychain]
+    authType = 3
+    authKey = "123"
 </code> </pre>
 
 **metric** - metric in linux local table
@@ -44,4 +49,3 @@ garbageTimer = 120
 ---
 TODO:
 * Test suit
-* Unicast neighbors

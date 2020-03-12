@@ -3,13 +3,18 @@ package main
 import (
 	"encoding/binary"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/vishvananda/netlink"
 )
 
-func getLocalTable(ifc string) (*pdu, error) {
-	link, err := netlink.LinkByName(ifc)
+type local struct {
+	mux sync.Mutex
+}
+
+func getTable(ifi int) (*pdu, error) {
+	link, err := netlink.LinkByIndex(ifi)
 	if err != nil {
 		return nil, err
 	}
@@ -19,48 +24,40 @@ func getLocalTable(ifc string) (*pdu, error) {
 		return nil, err
 	}
 
-	// TODO Check interface state
 	pdu := &pdu{
-		header: header{
-			Version: 2,
-			Command: 2,
-		},
+		header: header{Version: 2, Command: 2},
 		serviceFields: serviceFields{
 			ip:        binary.BigEndian.Uint32([]byte{127, 0, 0, 1}),
-			ifn:       link.Attrs().Name,
+			ifi:       link.Attrs().Index,
 			timestamp: time.Now().Unix(),
 		},
 	}
-	for i := 0; i < len(iplist); i++ {
-		if iplist[i].IP.IsLoopback() {
+	for _, ipAddr := range iplist {
+		if ipAddr.IP.IsLoopback() {
 			continue
 		}
-		routeEntry := routeEntry{
+		pdu.routeEntries = append(pdu.routeEntries, routeEntry{
 			AFI:     afiIPv4,
-			Network: binary.BigEndian.Uint32(iplist[i].IP.Mask(iplist[i].Mask)),
-			Mask:    binary.BigEndian.Uint32(iplist[i].Mask),
-			Metric:  0,
-			NextHop: 0,
-		}
-		pdu.routeEntries = append(pdu.routeEntries, routeEntry)
+			Network: binary.BigEndian.Uint32(ipAddr.IP.Mask(ipAddr.Mask)),
+			Mask:    binary.BigEndian.Uint32(ipAddr.Mask),
+		})
 	}
-
 	return pdu, nil
 }
 
-func addLocalRoute(network, mask, nextHop uint32) error {
-	if uintToIP(nextHop).Equal([]byte{127, 0, 0, 1}) {
+func addRoute(netid ipNet, nextHop uint32) error {
+	if uintToIP(nextHop).IsLoopback() {
 		return nil
 	}
 
 	dst := &net.IPNet{
-		IP:   uintToIP(network),
-		Mask: net.IPMask(uintToIP(mask)),
+		IP:   uintToIP(netid.ip),
+		Mask: net.IPMask(uintToIP(netid.mask)),
 	}
 	route := netlink.Route{
 		Dst:      dst,
 		Protocol: 10,
-		Priority: sys.config.Local.Metric,
+		Priority: sys.config.Global.Metric,
 		Gw:       uintToIP(nextHop),
 	}
 	if err := netlink.RouteAdd(&route); err != nil {
@@ -69,23 +66,31 @@ func addLocalRoute(network, mask, nextHop uint32) error {
 	return nil
 }
 
-func replaceLocalRoute(network, mask, nextHop uint32) error {
-	if uintToIP(nextHop).Equal([]byte{127, 0, 0, 1}) {
+func replRoute(netid ipNet, nextHop uint32) error {
+	if uintToIP(nextHop).IsLoopback() {
 		return nil
 	}
-	if err := removeLocalRoute(network, mask); err != nil {
-		return err
+
+	dst := &net.IPNet{
+		IP:   uintToIP(netid.ip),
+		Mask: net.IPMask(uintToIP(netid.mask)),
 	}
-	if err := addLocalRoute(network, mask, nextHop); err != nil {
+	route := netlink.Route{
+		Dst:      dst,
+		Protocol: 10,
+		Priority: sys.config.Global.Metric,
+		Gw:       uintToIP(nextHop),
+	}
+	if err := netlink.RouteReplace(&route); err != nil {
 		return err
 	}
 	return nil
 }
 
-func removeLocalRoute(network, mask uint32) error {
+func remRoute(netid ipNet) error {
 	dst := &net.IPNet{
-		IP:   uintToIP(network),
-		Mask: net.IPMask(uintToIP(mask)),
+		IP:   uintToIP(netid.ip),
+		Mask: net.IPMask(uintToIP(netid.ip)),
 	}
 	route := netlink.Route{
 		Dst:      dst,
@@ -98,7 +103,7 @@ func removeLocalRoute(network, mask uint32) error {
 	return nil
 }
 
-func clearLocalTable() error {
+func clrRoutes() error {
 	filter := &netlink.Route{
 		Protocol: 10,
 	}
@@ -115,14 +120,14 @@ func clearLocalTable() error {
 	return nil
 }
 
-func isLocalAddress(addr net.IP) (bool, error) {
+func isLocal(addr uint32) (bool, error) {
 	iplist, err := netlink.AddrList(nil, netlink.FAMILY_V4)
 	if err != nil {
 		return false, err
 	}
 
 	for _, ip := range iplist {
-		if ip.IP.Equal(addr) {
+		if ip.IP.Equal(uintToIP(addr)) {
 			return true, nil
 		}
 	}

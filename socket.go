@@ -39,7 +39,7 @@ func (s *socket) joinMcast() error {
 	group := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
 
 	for ifc := range sys.config.Interfaces {
-		ifi, err := net.InterfaceByName(ifc)
+		ifi, err := net.InterfaceByIndex(ifc)
 		if err != nil {
 			return err
 		}
@@ -54,7 +54,7 @@ func (s *socket) leaveMcast() error {
 	group := net.UDPAddr{IP: net.IPv4(224, 0, 0, 9)}
 
 	for ifc := range sys.config.Interfaces {
-		ifi, err := net.InterfaceByName(ifc)
+		ifi, err := net.InterfaceByIndex(ifc)
 		if err != nil {
 			return err
 		}
@@ -76,13 +76,13 @@ func (s *socket) timeout(c int) {
 	s.connect.SetReadDeadline(time.Now().Add(time.Millisecond * time.Duration(c)))
 }
 
-func (s *socket) sendMcast(data []byte, ifn string) error {
+func (s *socket) sendMcast(data []byte, ifn int) error {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
 	dst := &net.UDPAddr{IP: net.IPv4(224, 0, 0, 9), Port: 520}
 
-	ifi, _ := net.InterfaceByName(ifn)
+	ifi, _ := net.InterfaceByIndex(ifn)
 	if err := s.connect.SetMulticastInterface(ifi); err != nil {
 		return err
 	}

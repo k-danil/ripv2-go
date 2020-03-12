@@ -38,7 +38,7 @@ func logProcess() chan<- logEntry {
 		for l := range logChan {
 			var cLevel uint8
 			if sys.config != nil {
-				cLevel = sys.config.Local.Log
+				cLevel = sys.config.Global.Log
 			} else {
 				cLevel = 5
 			}

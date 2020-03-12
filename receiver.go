@@ -24,8 +24,8 @@ const (
 )
 
 type packet struct {
-	src     net.IP
-	ifn     string
+	src     uint32
+	ifi     int
 	content []byte
 }
 
@@ -70,23 +70,27 @@ type authKeyEntry struct {
 
 type serviceFields struct {
 	ip        uint32
-	ifn       string
+	ifi       int
 	timestamp int64
 	authType  uint16
 }
 
-func readPacket(content []byte, ifName string, src net.IP) (*packet, error) {
-	if val, _ := isLocalAddress(src); val {
+func readPacket(content []byte, ifi int, src uint32) (*packet, error) {
+	if val, _ := isLocal(src); val {
 		return nil, errors.New("Loop")
 	}
 
-	p := &packet{
-		src:     src,
-		ifn:     ifName,
-		content: content,
+	if _, ok := sys.config.Interfaces[ifi]; !ok {
+		if _, ok = sys.config.Neighbors[src]; !ok {
+			return nil, errors.New("Packet with unspecified source")
+		}
 	}
 
-	return p, nil
+	return &packet{
+		src:     src,
+		ifi:     ifi,
+		content: content,
+	}, nil
 }
 
 func (p *packet) parse() *pdu {
@@ -94,8 +98,8 @@ func (p *packet) parse() *pdu {
 
 	pdu := &pdu{
 		serviceFields: serviceFields{
-			ip:        binary.BigEndian.Uint32(p.src),
-			ifn:       p.ifn,
+			ip:        p.src,
+			ifi:       p.ifi,
 			timestamp: time.Now().Unix(),
 		},
 	}
@@ -113,6 +117,7 @@ func (p *packet) parse() *pdu {
 			case authPlain:
 				binary.Read(buf, binary.BigEndian, &pdu.authKeyEntry)
 				pdu.serviceFields.authType = authType
+
 			case authHash:
 				binary.Read(buf, binary.BigEndian, &pdu.authHashEntry)
 				pdu.serviceFields.authType = authType
