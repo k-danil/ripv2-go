@@ -33,8 +33,8 @@ type ipNet struct {
 
 type adj struct {
 	nextHop   uint32
-	ifi       int
 	metric    uint32
+	ifi       int
 	timestamp int64
 	kill      bool
 	change    bool

@@ -16,8 +16,8 @@ garbageTimer = 120
  [interfaces.lo]
   passive = true
 
- [neighbors]
-  [neighbors."192.168.90.1"]
-   [neighbors."192.168.90.1".keychain]
-    authType = 3
-    authKey = "123"
+#  [neighbors]
+#   [neighbors."192.168.90.1"]
+#    [neighbors."192.168.90.1".keychain]
+#     authType = 3
+#     authKey = "123"

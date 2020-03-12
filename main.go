@@ -98,9 +98,9 @@ Loop:
 					sys.logger.send(debug, pdu)
 				}
 
-				if !cm.Dst.IsMulticast() {
+				if _, ok := sys.config.Neighbors[src]; ok {
 					err = pdu.validate(sys.config.Neighbors[src].KeyChain)
-				} else {
+				} else if _, ok := sys.config.Interfaces[cm.IfIndex]; ok {
 					err = pdu.validate(sys.config.Interfaces[cm.IfIndex].KeyChain)
 				}
 

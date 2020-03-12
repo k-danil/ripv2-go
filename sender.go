@@ -7,45 +7,27 @@ import (
 	"time"
 )
 
-func (pdu *pdu) toByte(KeyChain keyChain) []byte {
+func (p *pdu) toByte() []byte {
 	if sys.config.Global.Log == 5 {
-		sys.logger.send(debug, pdu)
+		sys.logger.send(debug, p)
 	}
 
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, pdu.header)
+	binary.Write(buf, binary.BigEndian, p.header)
 
-	switch KeyChain.AuthType {
+	switch p.serviceFields.authType {
 	case authPlain:
-		plain := authKeyEntry{
-			AFI:      afiAuth,
-			AuthType: authPlain,
-			Key:      padKey(KeyChain.AuthKey),
-		}
-		binary.Write(buf, binary.BigEndian, plain)
+		binary.Write(buf, binary.BigEndian, p.authKeyEntry)
 	case authHash:
-		hash := authHashEntry{
-			AFI:      afiAuth,
-			AuthType: authHash,
-			PackLng:  uint16(24 + (len(pdu.routeEntries) * 20)),
-			KeyID:    1,
-			AuthLng:  20,
-			SQN:      uint32(time.Now().Unix()),
-		}
-		binary.Write(buf, binary.BigEndian, hash)
+		binary.Write(buf, binary.BigEndian, p.authHashEntry)
 	}
 
-	binary.Write(buf, binary.BigEndian, pdu.routeEntries)
+	binary.Write(buf, binary.BigEndian, p.routeEntries)
 
-	if KeyChain.AuthType == authHash {
-		key := authKeyEntry{
-			AFI:      afiAuth,
-			AuthType: authKey,
-			Key:      padKey(KeyChain.AuthKey),
-		}
-		binary.Write(buf, binary.BigEndian, key)
+	if p.serviceFields.authType == authHash {
+		binary.Write(buf, binary.BigEndian, p.authKeyEntry)
 		hash := md5.Sum(buf.Bytes())
-		buf.Truncate(28 + (len(pdu.routeEntries) * 20))
+		buf.Truncate(28 + (len(p.routeEntries) * 20))
 		binary.Write(buf, binary.BigEndian, hash)
 	}
 
@@ -66,10 +48,12 @@ func sendPduAll(pds []*pdu) {
 	for _, pdu := range pds {
 		if pdu.serviceFields.ifi != 0 {
 			ifi := pdu.serviceFields.ifi
-			sys.socket.sendMcast(pdu.toByte(sys.config.Interfaces[ifi].KeyChain), ifi)
+			pdu.makeAuth(sys.config.Interfaces[ifi].KeyChain.AuthKey)
+			sys.socket.sendMcast(pdu.toByte(), ifi)
 		} else if pdu.serviceFields.ip != 0 {
 			ip := pdu.serviceFields.ip
-			sys.socket.sendUcast(pdu.toByte(sys.config.Neighbors[ip].KeyChain), uintToIP(ip))
+			pdu.makeAuth(sys.config.Neighbors[ip].KeyChain.AuthKey)
+			sys.socket.sendUcast(pdu.toByte(), uintToIP(ip))
 		}
 	}
 }
@@ -81,9 +65,9 @@ func reqGiveAll() {
 		routeEntries: []routeEntry{{Metric: infMetric}},
 	}
 
-	for ip := range sys.config.Neighbors {
+	for ip, opt := range sys.config.Neighbors {
 		pdu := pduTemp
-		pdu.serviceFields = &serviceFields{ip: ip}
+		pdu.serviceFields = &serviceFields{ip: ip, authType: opt.KeyChain.AuthType}
 
 		pds = append(pds, &pdu)
 	}
@@ -92,7 +76,7 @@ func reqGiveAll() {
 			continue
 		}
 		pdu := pduTemp
-		pdu.serviceFields = &serviceFields{ifi: ifi}
+		pdu.serviceFields = &serviceFields{ifi: ifi, authType: opt.KeyChain.AuthType}
 
 		pds = append(pds, &pdu)
 	}
@@ -122,7 +106,8 @@ func (a *adjTable) respToReq(p *pdu) {
 		}
 	}
 	ip := p.serviceFields.ip
-	sys.socket.sendUcast(p.toByte(sys.config.Neighbors[ip].KeyChain), uintToIP(ip))
+	p.makeAuth(sys.config.Neighbors[ip].KeyChain.AuthKey)
+	sys.socket.sendUcast(p.toByte(), uintToIP(ip))
 }
 
 func (a *adjTable) respUpdate(change bool) {
@@ -147,31 +132,29 @@ func (a *adjTable) respUpdate(change bool) {
 
 func (a *adjTable) pduPerIfi(change bool, ifi int) []*pdu {
 	pds := make([]*pdu, 0)
-	size := sys.config.Global.MsgSize
-
-	if sys.config.Interfaces[ifi].KeyChain.AuthType > 0 {
-		size -= int(sys.config.Interfaces[ifi].KeyChain.AuthType - 1)
+	service := &serviceFields{
+		ifi:      ifi,
+		authType: sys.config.Interfaces[ifi].KeyChain.AuthType,
 	}
+
 	filter := func(a *adj) bool { return a.ifi != ifi }
 	filtered := a.filterBy(filter, change)
-	service := &serviceFields{ifi: ifi}
-	return append(pds, limitPduSize(size, filtered, service)...)
+	return append(pds, limitPduSize(sys.config.Global.MsgSize, filtered, service)...)
 
 }
 func (a *adjTable) pduPerIP(change bool, ip uint32) []*pdu {
 	pds := make([]*pdu, 0)
-	size := sys.config.Global.MsgSize
-
-	if sys.config.Neighbors[ip].KeyChain.AuthType > 0 {
-		size -= int(sys.config.Neighbors[ip].KeyChain.AuthType - 1)
+	service := &serviceFields{
+		ip:       ip,
+		authType: sys.config.Neighbors[ip].KeyChain.AuthType,
 	}
+
 	filter := func(a *adj) bool { return a.nextHop != ip }
 	filtered := a.filterBy(filter, change)
-	service := &serviceFields{ip: ip}
-	return append(pds, limitPduSize(size, filtered, service)...)
+	return append(pds, limitPduSize(sys.config.Global.MsgSize, filtered, service)...)
 }
 
-func (a *adjTable) filterBy(filter func(a *adj) bool, change bool) []routeEntry {
+func (a *adjTable) filterBy(filter func(*adj) bool, change bool) []routeEntry {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 	filtered := make([]routeEntry, 0)
@@ -196,6 +179,9 @@ func (a *adjTable) filterBy(filter func(a *adj) bool, change bool) []routeEntry 
 }
 
 func limitPduSize(size int, entList []routeEntry, service *serviceFields) []*pdu {
+	if service.authType > 0 {
+		size -= (int(service.authType) - 1)
+	}
 	count := (len(entList) / size) + 1
 	pds := make([]*pdu, count)
 
@@ -211,6 +197,27 @@ func limitPduSize(size int, entList []routeEntry, service *serviceFields) []*pdu
 	return pds
 }
 
-func (pdu *pdu) makeAuth() {
-
+func (p *pdu) makeAuth(pass string) {
+	switch p.serviceFields.authType {
+	case authPlain:
+		p.authKeyEntry = authKeyEntry{
+			AFI:      afiAuth,
+			AuthType: authPlain,
+			Key:      padKey(pass),
+		}
+	case authHash:
+		p.authHashEntry = authHashEntry{
+			AFI:      afiAuth,
+			AuthType: authHash,
+			PackLng:  uint16(24 + (len(p.routeEntries) * 20)),
+			KeyID:    1,
+			AuthLng:  20,
+			SQN:      uint32(time.Now().Unix()),
+		}
+		p.authKeyEntry = authKeyEntry{
+			AFI:      afiAuth,
+			AuthType: authKey,
+			Key:      padKey(pass),
+		}
+	}
 }

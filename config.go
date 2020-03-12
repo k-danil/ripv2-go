@@ -57,22 +57,22 @@ type keyChain struct {
 }
 
 func readConfig() (*config, error) {
-	var tempConfig tempConfig
+	var tmpConf tempConfig
 	var conf config
-	_, err := toml.DecodeFile(sys.cfgPath, &tempConfig)
+	_, err := toml.DecodeFile(sys.cfgPath, &tmpConf)
 	if err != nil {
 		return nil, err
 	}
 
 	conf = config{
-		Global: tempConfig.Global,
-		Timers: tempConfig.Timers,
+		Global: tmpConf.Global,
+		Timers: tmpConf.Timers,
 	}
 
 	conf.Interfaces = make(map[int]ifc, 0)
 	conf.Neighbors = make(map[uint32]nbrs, 0)
 
-	for ifn, param := range tempConfig.Interfaces {
+	for ifn, param := range tmpConf.Interfaces {
 		ifi, err := net.InterfaceByName(ifn)
 		if err != nil {
 			sys.logger.send(erro, err)
@@ -81,7 +81,7 @@ func readConfig() (*config, error) {
 		}
 	}
 
-	for ipn, param := range tempConfig.Neighbors {
+	for ipn, param := range tmpConf.Neighbors {
 		if net.ParseIP(ipn).To4().IsGlobalUnicast() {
 			ip := binary.BigEndian.Uint32(net.ParseIP(ipn).To4())
 			conf.Neighbors[ip] = param

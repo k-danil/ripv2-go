@@ -70,9 +70,9 @@ type authKeyEntry struct {
 
 type serviceFields struct {
 	ip        uint32
+	authType  uint16
 	ifi       int
 	timestamp int64
-	authType  uint16
 }
 
 func readPacket(content []byte, ifi int, src uint32) (*packet, error) {
@@ -81,6 +81,10 @@ func readPacket(content []byte, ifi int, src uint32) (*packet, error) {
 	}
 
 	if _, ok := sys.config.Interfaces[ifi]; !ok {
+		if _, ok = sys.config.Neighbors[src]; !ok {
+			return nil, errors.New("Packet with unspecified source")
+		}
+	} else {
 		if _, ok = sys.config.Neighbors[src]; !ok {
 			return nil, errors.New("Packet with unspecified source")
 		}
@@ -150,6 +154,7 @@ func (p *pdu) validate(keyChain keyChain) error {
 			}
 		}
 	} else {
+		fmt.Println(p.serviceFields.authType, keyChain.AuthType)
 		return errors.New("Incorrect AuthType")
 	}
 
