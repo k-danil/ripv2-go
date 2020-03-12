@@ -26,7 +26,7 @@ func getTable(ifi int) (*pdu, error) {
 
 	pdu := &pdu{
 		header: header{Version: 2, Command: 2},
-		serviceFields: serviceFields{
+		serviceFields: &serviceFields{
 			ip:        binary.BigEndian.Uint32([]byte{127, 0, 0, 1}),
 			ifi:       link.Attrs().Index,
 			timestamp: time.Now().Unix(),

@@ -30,7 +30,7 @@ type packet struct {
 }
 
 type pdu struct {
-	serviceFields serviceFields
+	serviceFields *serviceFields
 	header        header
 	routeEntries  []routeEntry
 	authHashEntry authHashEntry
@@ -59,7 +59,7 @@ type authHashEntry struct {
 	KeyID    uint8
 	AuthLng  uint8
 	SQN      uint32
-	Blank0   uint64
+	_        uint64
 }
 
 type authKeyEntry struct {
@@ -97,7 +97,7 @@ func (p *packet) parse() *pdu {
 	buf := bytes.NewBuffer(p.content)
 
 	pdu := &pdu{
-		serviceFields: serviceFields{
+		serviceFields: &serviceFields{
 			ip:        p.src,
 			ifi:       p.ifi,
 			timestamp: time.Now().Unix(),
@@ -107,39 +107,31 @@ func (p *packet) parse() *pdu {
 	binary.Read(buf, binary.BigEndian, &pdu.header)
 
 	for buf.Len() > 0 {
-		afi := binary.BigEndian.Uint16(buf.Bytes()[:2])
-		switch afi {
+		switch binary.BigEndian.Uint16(buf.Bytes()[:2]) {
 		case afiAuth:
-			authType := binary.BigEndian.Uint16(buf.Bytes()[2:4])
-			switch authType {
+			switch binary.BigEndian.Uint16(buf.Bytes()[2:4]) {
 			case authKey:
 				binary.Read(buf, binary.BigEndian, &pdu.authKeyEntry)
 			case authPlain:
 				binary.Read(buf, binary.BigEndian, &pdu.authKeyEntry)
-				pdu.serviceFields.authType = authType
-
+				pdu.serviceFields.authType = authPlain
 			case authHash:
 				binary.Read(buf, binary.BigEndian, &pdu.authHashEntry)
-				pdu.serviceFields.authType = authType
+				pdu.serviceFields.authType = authHash
 			}
-		case afiIPv4:
+		default:
 			if pdu.serviceFields.authType == authHash {
 				pdu.routeEntries = make([]routeEntry, buf.Len()/20-1)
 			} else {
 				pdu.routeEntries = make([]routeEntry, buf.Len()/20)
 			}
 			binary.Read(buf, binary.BigEndian, &pdu.routeEntries)
-		case afiGiveAll:
-			routeEntry := routeEntry{}
-			binary.Read(buf, binary.BigEndian, &routeEntry)
-			pdu.routeEntries = append(pdu.routeEntries, routeEntry)
 		}
 	}
-
 	return pdu
 }
 
-func (p *pdu) validate(content []byte, keyChain keyChain) error {
+func (p *pdu) validate(keyChain keyChain) error {
 	if p.header.Version != 2 {
 		return errors.New("Incorrect RIP version (use 2)")
 	}
@@ -152,7 +144,7 @@ func (p *pdu) validate(content []byte, keyChain keyChain) error {
 				return err
 			}
 		case authHash:
-			err := p.authHash(keyChain.AuthKey, content)
+			err := p.authHash(keyChain.AuthKey)
 			if err != nil {
 				return err
 			}
@@ -166,7 +158,7 @@ func (p *pdu) validate(content []byte, keyChain keyChain) error {
 			if p.routeEntries[l].Metric > infMetric {
 				p.routeEntries[l].Metric = invMetric
 				sys.logger.send(warn, fmt.Sprintf("Bad metric. Route entry %v marked invalid.", uintToIP(p.routeEntries[l].Network)))
-			} else if p.routeEntries[l].Network != 0 && !net.IP(uintToIP(p.routeEntries[l].Network)).IsGlobalUnicast() {
+			} else if p.routeEntries[l].Network != 0 && !uintToIP(p.routeEntries[l].Network).IsGlobalUnicast() {
 				p.routeEntries[l].Metric = invMetric
 				sys.logger.send(warn, fmt.Sprintf("Bad address. Route entry %v marked invalid.", uintToIP(p.routeEntries[l].Network)))
 			}
@@ -182,14 +174,17 @@ func (p *pdu) authPlain(pass string) error {
 	return nil
 }
 
-func (p *pdu) authHash(pass string, content []byte) error {
-	key := padKey(pass)
+func (p *pdu) authHash(pass string) error {
+	key := p.authKeyEntry.Key
+	p.authKeyEntry.Key = padKey(pass)
+	buf := new(bytes.Buffer)
 
-	tcont := make([]byte, 0, p.authHashEntry.PackLng+20)
-	tcont = append(tcont, content[:p.authHashEntry.PackLng+4]...)
-	tcont = append(tcont, key[:]...)
+	binary.Write(buf, binary.BigEndian, p.header)
+	binary.Write(buf, binary.BigEndian, p.authHashEntry)
+	binary.Write(buf, binary.BigEndian, p.routeEntries)
+	binary.Write(buf, binary.BigEndian, p.authKeyEntry)
 
-	if md5.Sum(tcont) != p.authKeyEntry.Key {
+	if md5.Sum(buf.Bytes()) != key {
 		return errors.New("Unauthenticated md5 pdu")
 	}
 	return nil

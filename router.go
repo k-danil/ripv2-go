@@ -150,7 +150,6 @@ func (a *adjTable) respProc(p *pdu) {
 	defer a.mux.Unlock()
 
 	for _, pEnt := range p.routeEntries {
-		//Calculate id to map
 		netid := ipNet{ip: pEnt.Network, mask: pEnt.Mask}
 		//Default next-hop is 0.0.0.0 but it can be anything else
 		var nh uint32
@@ -192,10 +191,7 @@ func (a *adjTable) respProc(p *pdu) {
 			}
 
 		case a.entries[netid].nextHop == nh && metric < a.entries[netid].metric:
-			a.entries[netid].timestamp = p.serviceFields.timestamp
-			a.entries[netid].metric = metric
-			a.entries[netid].change = change
-			a.entries[netid].kill = false
+			a.entries[netid] = newAdj()
 			a.change = change
 
 		case a.entries[netid].nextHop == nh && metric == a.entries[netid].metric:
@@ -222,7 +218,7 @@ func (a *adjTable) respProc(p *pdu) {
 	}
 }
 
-func (a *adjTable) cleanChangeFlag() {
+func (a *adjTable) clearChangeFlag() {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 	for _, opt := range a.entries {

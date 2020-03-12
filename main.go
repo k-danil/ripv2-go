@@ -99,9 +99,9 @@ Loop:
 				}
 
 				if !cm.Dst.IsMulticast() {
-					err = pdu.validate(packet.content, sys.config.Neighbors[src].KeyChain)
+					err = pdu.validate(sys.config.Neighbors[src].KeyChain)
 				} else {
-					err = pdu.validate(packet.content, sys.config.Interfaces[cm.IfIndex].KeyChain)
+					err = pdu.validate(sys.config.Interfaces[cm.IfIndex].KeyChain)
 				}
 
 				if err != nil {

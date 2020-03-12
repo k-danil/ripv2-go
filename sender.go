@@ -83,7 +83,7 @@ func reqGiveAll() {
 
 	for ip := range sys.config.Neighbors {
 		pdu := pduTemp
-		pdu.serviceFields = serviceFields{ip: ip}
+		pdu.serviceFields = &serviceFields{ip: ip}
 
 		pds = append(pds, &pdu)
 	}
@@ -92,7 +92,7 @@ func reqGiveAll() {
 			continue
 		}
 		pdu := pduTemp
-		pdu.serviceFields = serviceFields{ifi: ifi}
+		pdu.serviceFields = &serviceFields{ifi: ifi}
 
 		pds = append(pds, &pdu)
 	}
@@ -141,7 +141,7 @@ func (a *adjTable) respUpdate(change bool) {
 	sendPduAll(pds)
 
 	if change {
-		a.cleanChangeFlag()
+		a.clearChangeFlag()
 	}
 }
 
@@ -154,7 +154,7 @@ func (a *adjTable) pduPerIfi(change bool, ifi int) []*pdu {
 	}
 	filter := func(a *adj) bool { return a.ifi != ifi }
 	filtered := a.filterBy(filter, change)
-	service := serviceFields{ifi: ifi}
+	service := &serviceFields{ifi: ifi}
 	return append(pds, limitPduSize(size, filtered, service)...)
 
 }
@@ -167,7 +167,7 @@ func (a *adjTable) pduPerIP(change bool, ip uint32) []*pdu {
 	}
 	filter := func(a *adj) bool { return a.nextHop != ip }
 	filtered := a.filterBy(filter, change)
-	service := serviceFields{ip: ip}
+	service := &serviceFields{ip: ip}
 	return append(pds, limitPduSize(size, filtered, service)...)
 }
 
@@ -195,7 +195,7 @@ func (a *adjTable) filterBy(filter func(a *adj) bool, change bool) []routeEntry 
 	return filtered
 }
 
-func limitPduSize(size int, entList []routeEntry, service serviceFields) []*pdu {
+func limitPduSize(size int, entList []routeEntry, service *serviceFields) []*pdu {
 	count := (len(entList) / size) + 1
 	pds := make([]*pdu, count)
 
