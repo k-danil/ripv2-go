@@ -11,6 +11,11 @@ import (
 )
 
 const (
+	entrySize  int = 20
+	headerSize int = 4
+)
+
+const (
 	authNon   uint16 = 0
 	authKey   uint16 = 1
 	authPlain uint16 = 2
@@ -84,10 +89,6 @@ func readPacket(content []byte, ifi int, src uint32) (*packet, error) {
 		if _, ok = sys.config.Neighbors[src]; !ok {
 			return nil, errors.New("Packet with unspecified source")
 		}
-	} else {
-		if _, ok = sys.config.Neighbors[src]; !ok {
-			return nil, errors.New("Packet with unspecified source")
-		}
 	}
 
 	return &packet{
@@ -125,9 +126,9 @@ func (p *packet) parse() *pdu {
 			}
 		default:
 			if pdu.serviceFields.authType == authHash {
-				pdu.routeEntries = make([]routeEntry, buf.Len()/20-1)
+				pdu.routeEntries = make([]routeEntry, buf.Len()/entrySize-1)
 			} else {
-				pdu.routeEntries = make([]routeEntry, buf.Len()/20)
+				pdu.routeEntries = make([]routeEntry, buf.Len()/entrySize)
 			}
 			binary.Read(buf, binary.BigEndian, &pdu.routeEntries)
 		}
@@ -154,7 +155,6 @@ func (p *pdu) validate(keyChain keyChain) error {
 			}
 		}
 	} else {
-		fmt.Println(p.serviceFields.authType, keyChain.AuthType)
 		return errors.New("Incorrect AuthType")
 	}
 

@@ -1,6 +1,6 @@
 [global]
 metric = 120
-msgSize = 25
+entryCount = 25
 log = 4
 
 [timers]

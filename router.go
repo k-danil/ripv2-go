@@ -138,7 +138,7 @@ func (a *adjTable) clear(t *timers) {
 }
 
 func (a *adjTable) reqProc(p *pdu) {
-	if p.routeEntries[0].Metric == infMetric && p.routeEntries[0].Network == 0 {
+	if p.routeEntries[0].Metric == infMetric && p.routeEntries[0].AFI == afiGiveAll {
 		a.respToGive(p)
 	} else {
 		a.respToReq(p)
@@ -196,15 +196,6 @@ func (a *adjTable) respProc(p *pdu) {
 
 		case a.entries[netid].nextHop == nh && metric == a.entries[netid].metric:
 			a.entries[netid].timestamp = p.serviceFields.timestamp
-
-		case a.entries[netid].kill == true && metric == a.entries[netid].metric:
-			a.entries[netid] = newAdj()
-			a.change = change
-
-			err := replRoute(netid, nh)
-			if err != nil {
-				sys.logger.send(erro, err)
-			}
 
 		case metric < a.entries[netid].metric:
 			a.entries[netid] = newAdj()

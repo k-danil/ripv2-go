@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultMsgSize      = 25
+	defaultEntryCount   = 25
 	defaultUpdateTimer  = 30
 	defaultTimeoutTimer = 180
 	defaultGarbageTimer = 120
@@ -31,9 +31,9 @@ type config struct {
 }
 
 type global struct {
-	Metric  int
-	MsgSize int
-	Log     uint8
+	Metric     int
+	EntryCount int
+	Log        uint8
 }
 
 type timers struct {
@@ -96,8 +96,8 @@ func (c *config) validate() error {
 		c.Global.Metric = defaultLocalMetric
 		return errors.New("local metric must be in range 1-255")
 	}
-	if c.Global.MsgSize < 25 && c.Global.MsgSize > 255 {
-		c.Global.MsgSize = defaultMsgSize
+	if c.Global.EntryCount < 25 && c.Global.EntryCount > 255 {
+		c.Global.EntryCount = defaultEntryCount
 		return errors.New("Number of route entries per update message must be in range 25-255")
 	}
 	if c.Timers.UpdateTimer < 10 && c.Timers.UpdateTimer > 60 {

@@ -8,7 +8,7 @@ import (
 )
 
 func (p *pdu) toByte() []byte {
-	if sys.config.Global.Log == 5 {
+	if sys.config.Global.Log == debug {
 		sys.logger.send(debug, p)
 	}
 
@@ -27,7 +27,7 @@ func (p *pdu) toByte() []byte {
 	if p.serviceFields.authType == authHash {
 		binary.Write(buf, binary.BigEndian, p.authKeyEntry)
 		hash := md5.Sum(buf.Bytes())
-		buf.Truncate(28 + (len(p.routeEntries) * 20))
+		buf.Truncate(int(p.authHashEntry.PackLng) + 4)
 		binary.Write(buf, binary.BigEndian, hash)
 	}
 
@@ -139,7 +139,7 @@ func (a *adjTable) pduPerIfi(change bool, ifi int) []*pdu {
 
 	filter := func(a *adj) bool { return a.ifi != ifi }
 	filtered := a.filterBy(filter, change)
-	return append(pds, limitPduSize(sys.config.Global.MsgSize, filtered, service)...)
+	return append(pds, limitPduSize(sys.config.Global.EntryCount, filtered, service)...)
 
 }
 func (a *adjTable) pduPerIP(change bool, ip uint32) []*pdu {
@@ -151,7 +151,7 @@ func (a *adjTable) pduPerIP(change bool, ip uint32) []*pdu {
 
 	filter := func(a *adj) bool { return a.nextHop != ip }
 	filtered := a.filterBy(filter, change)
-	return append(pds, limitPduSize(sys.config.Global.MsgSize, filtered, service)...)
+	return append(pds, limitPduSize(sys.config.Global.EntryCount, filtered, service)...)
 }
 
 func (a *adjTable) filterBy(filter func(*adj) bool, change bool) []routeEntry {
@@ -180,7 +180,7 @@ func (a *adjTable) filterBy(filter func(*adj) bool, change bool) []routeEntry {
 
 func limitPduSize(size int, entList []routeEntry, service *serviceFields) []*pdu {
 	if service.authType > 0 {
-		size -= (int(service.authType) - 1)
+		size -= int(service.authType) - 1
 	}
 	count := (len(entList) / size) + 1
 	pds := make([]*pdu, count)
@@ -209,9 +209,9 @@ func (p *pdu) makeAuth(pass string) {
 		p.authHashEntry = authHashEntry{
 			AFI:      afiAuth,
 			AuthType: authHash,
-			PackLng:  uint16(24 + (len(p.routeEntries) * 20)),
+			PackLng:  uint16(headerSize + entrySize + (len(p.routeEntries) * entrySize)),
 			KeyID:    1,
-			AuthLng:  20,
+			AuthLng:  uint8(entrySize),
 			SQN:      uint32(time.Now().Unix()),
 		}
 		p.authKeyEntry = authKeyEntry{

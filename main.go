@@ -19,11 +19,11 @@ type system struct {
 }
 
 type sign struct {
-	resetSched  chan bool
-	stopSched   chan bool
-	stopReceive chan bool
-	getAdj      chan bool
-	getNbr      chan bool
+	resetSched  chan struct{}
+	stopSched   chan struct{}
+	stopReceive chan struct{}
+	getAdj      chan struct{}
+	getNbr      chan struct{}
 }
 
 var sys = system{}
@@ -76,7 +76,7 @@ Loop:
 		case <-sys.signal.stopReceive:
 			break Loop
 		default:
-			b := make([]byte, (sys.config.Global.MsgSize*20 + 4))
+			b := make([]byte, (sys.config.Global.EntryCount*entrySize + headerSize))
 
 			s, cm, _, err := sys.socket.connect.ReadFrom(b)
 			if err, ok := err.(net.Error); ok && !err.Timeout() {
@@ -94,7 +94,7 @@ Loop:
 				}
 
 				pdu := packet.parse()
-				if sys.config.Global.Log == 5 {
+				if sys.config.Global.Log == debug {
 					sys.logger.send(debug, pdu)
 				}
 
@@ -107,7 +107,7 @@ Loop:
 				if err != nil {
 					sys.logger.send(warn, err)
 				} else {
-					if pdu.serviceFields.authType != 0 {
+					if pdu.serviceFields.authType != authNon {
 						nbr.update(pdu.serviceFields.ip, state|auth)
 					} else {
 						nbr.update(pdu.serviceFields.ip, state)
@@ -124,11 +124,11 @@ func signalProcess() *sign {
 	signal.Notify(signChan)
 
 	sign := &sign{}
-	sign.getAdj = make(chan bool)
-	sign.getNbr = make(chan bool)
-	sign.resetSched = make(chan bool)
-	sign.stopReceive = make(chan bool)
-	sign.stopSched = make(chan bool)
+	sign.getAdj = make(chan struct{})
+	sign.getNbr = make(chan struct{})
+	sign.resetSched = make(chan struct{})
+	sign.stopReceive = make(chan struct{})
+	sign.stopSched = make(chan struct{})
 
 	go func() {
 		for s := range signChan {
@@ -149,16 +149,16 @@ func signalProcess() *sign {
 				if err := sys.socket.joinMcast(); err != nil {
 					sys.logger.send(erro, err)
 				}
-				sign.resetSched <- true
+				sign.resetSched <- struct{}{}
 			case os.Interrupt:
-				sign.stopSched <- true
-				sign.stopReceive <- true
+				sign.stopSched <- struct{}{}
+				sign.stopReceive <- struct{}{}
 				sys.socket.timeout(1)
 				return
 			case syscall.SIGUSR1:
-				sign.getAdj <- true
+				sign.getAdj <- struct{}{}
 			case syscall.SIGUSR2:
-				sign.getNbr <- true
+				sign.getNbr <- struct{}{}
 			}
 		}
 	}()

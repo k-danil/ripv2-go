@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"time"
 )
@@ -24,7 +25,7 @@ type logEntry struct {
 }
 
 func logProcess() chan<- logEntry {
-	logChan := make(chan logEntry, 10)
+	logChan := make(chan logEntry, 4)
 
 	go func() {
 		levels := []string{
@@ -40,7 +41,7 @@ func logProcess() chan<- logEntry {
 			if sys.config != nil {
 				cLevel = sys.config.Global.Log
 			} else {
-				cLevel = 5
+				cLevel = debug
 			}
 
 			msg := fmt.Sprintf("[%v] %v", levels[l.level], l.message)
@@ -58,7 +59,7 @@ func (l logger) send(lv uint8, msg interface{}) {
 	switch msg.(type) {
 	case error:
 		l <- logEntry{lv, msg.(error).Error()}
-		if lv == 1 {
+		if lv == fatal {
 			time.Sleep(100 * time.Millisecond)
 			os.Exit(1)
 		}
@@ -67,16 +68,17 @@ func (l logger) send(lv uint8, msg interface{}) {
 	case *pdu:
 		m := fmt.Sprintf("%+v\n", msg)
 		l <- logEntry{lv, m}
-	case map[uint64]*adj:
+	case map[ipNet]*adj:
 		m := "Adjustments:\n"
-		for _, v := range msg.(map[uint64]*adj) {
-			m += fmt.Sprintf("%v\n", v.String())
+		for ip, opt := range msg.(map[ipNet]*adj) {
+			s, _ := net.IPMask(uintToIP(ip.mask)).Size()
+			m += fmt.Sprintf("%v/%v %v\n", uintToIP(ip.ip), s, opt.String())
 		}
 		l <- logEntry{lv, m}
 	case map[uint32]*nbr:
 		m := "Neighbors:\n"
-		for ip, v := range msg.(map[uint32]*nbr) {
-			m += fmt.Sprintf("ip: %v\t%v\n", uintToIP(ip), v.String())
+		for ip, opt := range msg.(map[uint32]*nbr) {
+			m += fmt.Sprintf("ip: %v\t%v\n", uintToIP(ip), opt.String())
 		}
 		l <- logEntry{lv, m}
 	}
