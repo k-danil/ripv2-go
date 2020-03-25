@@ -19,7 +19,8 @@ type system struct {
 }
 
 type sign struct {
-	resetSched  chan struct{}
+	resetAdj    chan struct{}
+	resetNbr    chan struct{}
 	stopSched   chan struct{}
 	stopReceive chan struct{}
 	getAdj      chan struct{}
@@ -50,10 +51,6 @@ func main() {
 	if sys.config, err = readConfig(); err != nil {
 		sys.logger.send(fatal, err)
 	}
-	err = sys.config.validate()
-	if err != nil {
-		sys.logger.send(warn, err)
-	}
 
 	if sys.socket, err = socketOpen(); err != nil {
 		sys.logger.send(fatal, err)
@@ -61,6 +58,8 @@ func main() {
 
 	adj := initAdjTable()
 	nbr := initNbrTable()
+
+	// go tableSubscr()
 
 	if err = sys.socket.joinMcast(); err != nil {
 		sys.logger.send(erro, err)
@@ -107,11 +106,7 @@ Loop:
 				if err != nil {
 					sys.logger.send(warn, err)
 				} else {
-					if pdu.serviceFields.authType != authNon {
-						nbr.update(pdu.serviceFields.ip, state|auth)
-					} else {
-						nbr.update(pdu.serviceFields.ip, state)
-					}
+					nbr.update(pdu.serviceFields.ip, pdu.serviceFields.ifi)
 					adj.procIncom(pdu)
 				}
 			}()
@@ -126,7 +121,8 @@ func signalProcess() *sign {
 	sign := &sign{}
 	sign.getAdj = make(chan struct{})
 	sign.getNbr = make(chan struct{})
-	sign.resetSched = make(chan struct{})
+	sign.resetAdj = make(chan struct{})
+	sign.resetNbr = make(chan struct{})
 	sign.stopReceive = make(chan struct{})
 	sign.stopSched = make(chan struct{})
 
@@ -139,17 +135,13 @@ func signalProcess() *sign {
 				} else {
 					sys.config = config
 				}
-				err := sys.config.validate()
-				if err != nil {
-					sys.logger.send(warn, err)
-				}
 				if err := sys.socket.leaveMcast(); err != nil {
 					sys.logger.send(erro, err)
 				}
 				if err := sys.socket.joinMcast(); err != nil {
 					sys.logger.send(erro, err)
 				}
-				sign.resetSched <- struct{}{}
+				sign.resetAdj <- struct{}{}
 			case os.Interrupt:
 				sign.stopSched <- struct{}{}
 				sign.stopReceive <- struct{}{}

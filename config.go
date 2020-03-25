@@ -59,8 +59,7 @@ type keyChain struct {
 func readConfig() (*config, error) {
 	var tmpConf tempConfig
 	var conf config
-	_, err := toml.DecodeFile(sys.cfgPath, &tmpConf)
-	if err != nil {
+	if _, err := toml.DecodeFile(sys.cfgPath, &tmpConf); err != nil {
 		return nil, err
 	}
 
@@ -75,42 +74,51 @@ func readConfig() (*config, error) {
 	for ifn, param := range tmpConf.Interfaces {
 		ifi, err := net.InterfaceByName(ifn)
 		if err != nil {
-			sys.logger.send(erro, err)
+			sys.logger.send(warn, err)
 		} else {
 			conf.Interfaces[ifi.Index] = param
 		}
 	}
 
 	for ipn, param := range tmpConf.Neighbors {
-		if net.ParseIP(ipn).To4().IsGlobalUnicast() {
-			ip := binary.BigEndian.Uint32(net.ParseIP(ipn).To4())
+		ip := net.ParseIP(ipn).To4()
+		if ip.IsGlobalUnicast() {
+			ip := binary.BigEndian.Uint32(ip)
 			conf.Neighbors[ip] = param
+		} else {
+			sys.logger.send(warn, "unvalidated static neighbor IP "+ipn)
 		}
 	}
+
+	conf.validate()
 
 	return &conf, nil
 }
 
-func (c *config) validate() error {
+func (c *config) validate() {
 	if c.Global.Metric == 0 && c.Global.Metric > 255 {
 		c.Global.Metric = defaultLocalMetric
-		return errors.New("local metric must be in range 1-255")
+		err := errors.New("local metric must be in range 1-255")
+		sys.logger.send(warn, err)
 	}
 	if c.Global.EntryCount < 25 && c.Global.EntryCount > 255 {
 		c.Global.EntryCount = defaultEntryCount
-		return errors.New("Number of route entries per update message must be in range 25-255")
+		err := errors.New("number of route entries per update message must be in range 25-255")
+		sys.logger.send(warn, err)
 	}
 	if c.Timers.UpdateTimer < 10 && c.Timers.UpdateTimer > 60 {
 		c.Timers.UpdateTimer = defaultUpdateTimer
-		return errors.New("Interval between regular route updates must be in range 10-60")
+		err := errors.New("interval between regular route updates must be in range 10-60")
+		sys.logger.send(warn, err)
 	}
 	if c.Timers.TimeoutTimer < 30 && c.Timers.TimeoutTimer > 360 {
 		c.Timers.TimeoutTimer = defaultTimeoutTimer
-		return errors.New("Delay before routes time out must be in range 30-360")
+		err := errors.New("delay before routes time out must be in range 30-360")
+		sys.logger.send(warn, err)
 	}
 	if c.Timers.GarbageTimer < 10 && c.Timers.GarbageTimer > 180 {
 		c.Timers.GarbageTimer = defaultGarbageTimer
-		return errors.New("Hold-down time must be in range 10-180")
+		err := errors.New("hold-down time must be in range 10-180")
+		sys.logger.send(warn, err)
 	}
-	return nil
 }

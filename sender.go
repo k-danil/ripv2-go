@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+var authEntries = map[uint16]int{
+	0: 0,
+	1: 0,
+	2: 1,
+	3: 2,
+}
+
+type filtFunc func(*adj) bool
+
 func (p *pdu) toByte() []byte {
 	if sys.config.Global.Log == debug {
 		sys.logger.send(debug, p)
@@ -34,14 +43,15 @@ func (p *pdu) toByte() []byte {
 	return buf.Bytes()
 }
 
-func padKey(key string) [16]byte {
-	var arr [16]byte
-	k := key
-	for l := 0; l < (16 - len(key)); l++ {
-		k += "\x00"
+func padKey(key string) (arr [16]byte) {
+	i := len(key)
+	if i > 15 {
+		i = 15
 	}
-	copy(arr[:], k)
-	return arr
+	for pos := range key[:i] {
+		arr[pos] = key[pos]
+	}
+	return
 }
 
 func sendPduAll(pds []*pdu) {
@@ -49,17 +59,17 @@ func sendPduAll(pds []*pdu) {
 		if pdu.serviceFields.ifi != 0 {
 			ifi := pdu.serviceFields.ifi
 			pdu.makeAuth(sys.config.Interfaces[ifi].KeyChain.AuthKey)
-			sys.socket.sendMcast(pdu.toByte(), ifi)
+			go sys.socket.sendMcast(pdu.toByte(), ifi)
 		} else if pdu.serviceFields.ip != 0 {
 			ip := pdu.serviceFields.ip
 			pdu.makeAuth(sys.config.Neighbors[ip].KeyChain.AuthKey)
-			sys.socket.sendUcast(pdu.toByte(), uintToIP(ip))
+			go sys.socket.sendUcast(pdu.toByte(), uintToIP(ip))
 		}
 	}
 }
 
 func reqGiveAll() {
-	pds := make([]*pdu, 0)
+	pds := make([]*pdu, 0, 8)
 	pduTemp := pdu{
 		header:       header{Command: request, Version: 2},
 		routeEntries: []routeEntry{{Metric: infMetric}},
@@ -85,7 +95,7 @@ func reqGiveAll() {
 }
 
 func (a *adjTable) respToGive(p *pdu) {
-	pds := make([]*pdu, 0)
+	pds := make([]*pdu, 0, 8)
 
 	if _, ok := sys.config.Neighbors[p.serviceFields.ip]; ok {
 		pds = a.pduPerIP(!change, p.serviceFields.ip)
@@ -98,7 +108,7 @@ func (a *adjTable) respToGive(p *pdu) {
 
 func (a *adjTable) respToReq(p *pdu) {
 	for _, pEnt := range p.routeEntries {
-		netid := ipNet{ip: pEnt.Network, mask: pEnt.Mask}
+		netid := ipNet{IP: pEnt.Network, Mask: pEnt.Mask}
 		if a.entries[netid] == nil {
 			pEnt.Metric = infMetric
 		} else {
@@ -111,7 +121,7 @@ func (a *adjTable) respToReq(p *pdu) {
 }
 
 func (a *adjTable) respUpdate(change bool) {
-	pds := make([]*pdu, 0)
+	pds := make([]*pdu, 0, 8)
 
 	for ip := range sys.config.Neighbors {
 		pds = append(pds, a.pduPerIP(change, ip)...)
@@ -131,7 +141,7 @@ func (a *adjTable) respUpdate(change bool) {
 }
 
 func (a *adjTable) pduPerIfi(change bool, ifi int) []*pdu {
-	pds := make([]*pdu, 0)
+	pds := make([]*pdu, 0, 8)
 	service := &serviceFields{
 		ifi:      ifi,
 		authType: sys.config.Interfaces[ifi].KeyChain.AuthType,
@@ -143,7 +153,7 @@ func (a *adjTable) pduPerIfi(change bool, ifi int) []*pdu {
 
 }
 func (a *adjTable) pduPerIP(change bool, ip uint32) []*pdu {
-	pds := make([]*pdu, 0)
+	pds := make([]*pdu, 0, 8)
 	service := &serviceFields{
 		ip:       ip,
 		authType: sys.config.Neighbors[ip].KeyChain.AuthType,
@@ -154,10 +164,10 @@ func (a *adjTable) pduPerIP(change bool, ip uint32) []*pdu {
 	return append(pds, limitPduSize(sys.config.Global.EntryCount, filtered, service)...)
 }
 
-func (a *adjTable) filterBy(filter func(*adj) bool, change bool) []routeEntry {
-	a.mux.Lock()
-	defer a.mux.Unlock()
-	filtered := make([]routeEntry, 0)
+func (a *adjTable) filterBy(filter filtFunc, change bool) []routeEntry {
+	a.mux.RLock()
+	defer a.mux.RUnlock()
+	filtered := make([]routeEntry, 0, 4)
 
 	for net, opt := range a.entries {
 		if change {
@@ -167,8 +177,8 @@ func (a *adjTable) filterBy(filter func(*adj) bool, change bool) []routeEntry {
 		}
 		if filter(opt) {
 			routeEntry := routeEntry{
-				Network: net.ip,
-				Mask:    net.mask,
+				Network: net.IP,
+				Mask:    net.Mask,
 				Metric:  opt.metric,
 				AFI:     afiIPv4,
 			}
@@ -179,11 +189,9 @@ func (a *adjTable) filterBy(filter func(*adj) bool, change bool) []routeEntry {
 }
 
 func limitPduSize(size int, entList []routeEntry, service *serviceFields) []*pdu {
-	if service.authType > 0 {
-		size -= int(service.authType) - 1
-	}
+	size -= authEntries[service.authType]
 	count := (len(entList) / size) + 1
-	pds := make([]*pdu, count)
+	pds := make([]*pdu, 8)
 
 	for i := 0; i < count; i++ {
 		pds[i] = &pdu{

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -51,8 +52,8 @@ func addRoute(netid ipNet, nextHop uint32) error {
 	}
 
 	dst := &net.IPNet{
-		IP:   uintToIP(netid.ip),
-		Mask: net.IPMask(uintToIP(netid.mask)),
+		IP:   uintToIP(netid.IP),
+		Mask: net.IPMask(uintToIP(netid.Mask)),
 	}
 	route := netlink.Route{
 		Dst:      dst,
@@ -72,8 +73,8 @@ func replRoute(netid ipNet, nextHop uint32) error {
 	}
 
 	dst := &net.IPNet{
-		IP:   uintToIP(netid.ip),
-		Mask: net.IPMask(uintToIP(netid.mask)),
+		IP:   uintToIP(netid.IP),
+		Mask: net.IPMask(uintToIP(netid.Mask)),
 	}
 	route := netlink.Route{
 		Dst:      dst,
@@ -89,8 +90,8 @@ func replRoute(netid ipNet, nextHop uint32) error {
 
 func remRoute(netid ipNet) error {
 	dst := &net.IPNet{
-		IP:   uintToIP(netid.ip),
-		Mask: net.IPMask(uintToIP(netid.ip)),
+		IP:   uintToIP(netid.IP),
+		Mask: net.IPMask(uintToIP(netid.IP)),
 	}
 	route := netlink.Route{
 		Dst:      dst,
@@ -133,4 +134,17 @@ func isLocal(addr uint32) (bool, error) {
 	}
 
 	return false, nil
+}
+
+func tableSubscr() {
+	ch := make(chan netlink.AddrUpdate)
+	done := make(chan struct{})
+	defer close(done)
+
+	if err := netlink.AddrSubscribe(ch, done); err != nil {
+		sys.logger.send(warn, err)
+	}
+	for msg := range ch {
+		fmt.Printf("%+v", msg)
+	}
 }

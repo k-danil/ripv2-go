@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"time"
 )
@@ -71,14 +70,13 @@ func (l logger) send(lv uint8, msg interface{}) {
 	case map[ipNet]*adj:
 		m := "Adjustments:\n"
 		for ip, opt := range msg.(map[ipNet]*adj) {
-			s, _ := net.IPMask(uintToIP(ip.mask)).Size()
-			m += fmt.Sprintf("%v/%v %v\n", uintToIP(ip.ip), s, opt.String())
+			m += fmt.Sprintf("%v %s\n", ip, opt)
 		}
 		l <- logEntry{lv, m}
 	case map[uint32]*nbr:
 		m := "Neighbors:\n"
 		for ip, opt := range msg.(map[uint32]*nbr) {
-			m += fmt.Sprintf("ip: %v\t%v\n", uintToIP(ip), opt.String())
+			m += fmt.Sprintf("%v\t%s\n", uintToIP(ip), opt)
 		}
 		l <- logEntry{lv, m}
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"sync"
 	"time"
 )
@@ -11,24 +12,24 @@ const (
 )
 
 const (
-	request  uint8 = 1
-	response uint8 = 2
+	request  = 1
+	response = 2
 )
 
 const (
-	infMetric uint32 = 16
-	invMetric uint32 = 255
+	infMetric = 16
+	invMetric = 255
 )
 
 type adjTable struct {
 	entries map[ipNet]*adj
-	mux     sync.Mutex
+	mux     sync.RWMutex
 	change  bool
 }
 
 type ipNet struct {
-	ip   uint32
-	mask uint32
+	IP   uint32
+	Mask uint32
 }
 
 type adj struct {
@@ -48,9 +49,14 @@ func (a *adj) String() string {
 	)
 }
 
+func (i ipNet) String() string {
+	s, _ := net.IPMask(uintToIP(i.Mask)).Size()
+	return fmt.Sprintf("%v/%v", uintToIP(i.IP), s)
+}
+
 func initAdjTable() *adjTable {
 	a := &adjTable{}
-	a.entries = make(map[ipNet]*adj)
+	a.entries = make(map[ipNet]*adj, 64)
 	go a.scheduler()
 
 	for i := range sys.config.Interfaces {
@@ -62,8 +68,6 @@ func initAdjTable() *adjTable {
 		}
 	}
 
-	reqGiveAll()
-
 	return a
 }
 
@@ -71,6 +75,7 @@ func (a *adjTable) scheduler() {
 	sys.logger.send(info, "starting scheduler")
 	tWorker := time.NewTicker(5 * time.Second)
 	tKeepAlive := time.NewTicker(time.Duration(sys.config.Timers.UpdateTimer) * time.Second)
+	go reqGiveAll()
 	for {
 		select {
 		case <-tKeepAlive.C:
@@ -89,14 +94,14 @@ func (a *adjTable) scheduler() {
 				go a.respUpdate(change)
 			}
 
-			a.clear(&sys.config.Timers)
+			go a.clear(&sys.config.Timers)
 		case <-sys.signal.getAdj:
 			sys.logger.send(user, a.entries)
 		case <-sys.signal.stopSched:
-			defer sys.logger.send(info, "stoping scheduler")
+			defer sys.logger.send(info, "stopping scheduler")
 			return
-		case <-sys.signal.resetSched:
-			defer sys.logger.send(info, "stoping scheduler")
+		case <-sys.signal.resetAdj:
+			defer sys.logger.send(info, "stopping scheduler")
 			go a.scheduler()
 			return
 		}
@@ -106,9 +111,9 @@ func (a *adjTable) scheduler() {
 func (a *adjTable) procIncom(p *pdu) {
 	switch p.header.Command {
 	case request:
-		a.reqProc(p)
+		go a.reqProc(p)
 	case response:
-		a.respProc(p)
+		go a.respProc(p)
 	}
 }
 
@@ -150,7 +155,7 @@ func (a *adjTable) respProc(p *pdu) {
 	defer a.mux.Unlock()
 
 	for _, pEnt := range p.routeEntries {
-		netid := ipNet{ip: pEnt.Network, mask: pEnt.Mask}
+		netid := ipNet{IP: pEnt.Network, Mask: pEnt.Mask}
 		//Default next-hop is 0.0.0.0 but it can be anything else
 		var nh uint32
 		if pEnt.NextHop != 0 {

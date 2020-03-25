@@ -11,21 +11,21 @@ import (
 )
 
 const (
-	entrySize  int = 20
-	headerSize int = 4
+	entrySize  = 20
+	headerSize = 4
 )
 
 const (
-	authNon   uint16 = 0
-	authKey   uint16 = 1
-	authPlain uint16 = 2
-	authHash  uint16 = 3
+	authNon   = 0
+	authKey   = 1
+	authPlain = 2
+	authHash  = 3
 )
 
 const (
-	afiAuth    uint16 = 0xffff
-	afiIPv4    uint16 = 2
-	afiGiveAll uint16 = 0
+	afiAuth    = 0xffff
+	afiIPv4    = 2
+	afiGiveAll = 0
 )
 
 type packet struct {
@@ -138,7 +138,7 @@ func (p *packet) parse() *pdu {
 
 func (p *pdu) validate(keyChain keyChain) error {
 	if p.header.Version != 2 {
-		return errors.New("Incorrect RIP version (use 2)")
+		return errors.New("incorrect RIP version (use 2)")
 	}
 
 	if p.serviceFields.authType == keyChain.AuthType {
@@ -155,17 +155,17 @@ func (p *pdu) validate(keyChain keyChain) error {
 			}
 		}
 	} else {
-		return errors.New("Incorrect AuthType")
+		return errors.New("incorrect AuthType")
 	}
 
 	if p.header.Command == response {
 		for l := 0; l < len(p.routeEntries); l++ {
 			if p.routeEntries[l].Metric > infMetric {
 				p.routeEntries[l].Metric = invMetric
-				sys.logger.send(warn, fmt.Sprintf("Bad metric. Route entry %v marked invalid.", uintToIP(p.routeEntries[l].Network)))
+				sys.logger.send(warn, fmt.Sprintf("route entry %v marked invalid", uintToIP(p.routeEntries[l].Network)))
 			} else if p.routeEntries[l].Network != 0 && !uintToIP(p.routeEntries[l].Network).IsGlobalUnicast() {
 				p.routeEntries[l].Metric = invMetric
-				sys.logger.send(warn, fmt.Sprintf("Bad address. Route entry %v marked invalid.", uintToIP(p.routeEntries[l].Network)))
+				sys.logger.send(warn, fmt.Sprintf("route entry %v marked invalid", uintToIP(p.routeEntries[l].Network)))
 			}
 		}
 	}
@@ -174,7 +174,7 @@ func (p *pdu) validate(keyChain keyChain) error {
 
 func (p *pdu) authPlain(pass string) error {
 	if p.authKeyEntry.Key != padKey(pass) {
-		return errors.New("Unauthenticated plain pass pdu")
+		return errors.New("unauthenticated plain pass pdu")
 	}
 	return nil
 }
@@ -190,7 +190,7 @@ func (p *pdu) authHash(pass string) error {
 	binary.Write(buf, binary.BigEndian, p.authKeyEntry)
 
 	if md5.Sum(buf.Bytes()) != key {
-		return errors.New("Unauthenticated md5 pdu")
+		return errors.New("unauthenticated md5 pdu")
 	}
 	return nil
 }
